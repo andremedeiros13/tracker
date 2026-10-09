@@ -101,17 +101,23 @@ lê as pages que mudaram e notifica.
 ```
 📄 Tracker (page)
    ├── 🗂️ To-Dos (child database — board por Status)  ← a fila de atenção (POC)
-   ├── 🗣️ 1-on-1 (child database — tabela por Data)   ← transcrições (módulo futuro)
-   └── 📄 Brag document (child page)                   ← entregas diárias (módulo futuro)
+   ├── 📄 Brag document (child page)                   ← entregas diárias (módulo futuro)
+   └── 🗣️ 1-on-1 (child page)                          ← conversas contínuas (módulo futuro)
 ```
 
-- **To-Dos** é um **database**: gestão de fluxo — arrasta o card entre colunas para
-  mudar o estado, o daemon notifica no ciclo.
+- **To-Dos** é o único **database**: gestão de fluxo — arrasta o card entre colunas para
+  mudar o estado, o daemon notifica no ciclo. O que é fluxo pede estrutura: cards, drag,
+  filtro por Status.
 - **Brag document** é uma **page** (não database): o registro do que você entregou —
   headers por dia, bullets por entrega. Log cronológico, não board. O módulo
   Tracking (futuro) adiciona o bullet via API de blocks; você narra o impacto à mão.
-- **1-on-1** é um **database**: transcrições com propriedades estruturadas
-  (Data, Resumo, Action items) — o parsing do módulo futuro escreve lá.
+- **1-on-1** é uma **page** (não database): as conversas em formato contínuo —
+  header da data, narrativa da conversa, action items em callout (que viram rows
+  no To-Dos). O módulo OneOnOnes (futuro) faz o append do resumo da transcrição
+  via API de blocks.
+
+A regra: **o que é gestão de fluxo vira database; o que é registro ou narrativa vira
+page** — cada formato segue o propósito.
 
 ---
 

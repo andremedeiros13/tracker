@@ -10,13 +10,14 @@ para quebrar o estado de hiperfoco.
   `app/domains/todos/CONTEXT.md`
 - **Frontend**: o Notion — os Databases do Notion são a UI da fila de atenção **e** a
   fonte da verdade ([ADR 0001](docs/adr/0001-notion-como-frontend.md)). Estrutura na
-  page "Tracker": To-Dos (database, board por Status), 1-on-1 (database, tabela),
-  **Brag document** (page — entregas diárias, headers por dia + bullets; log
-  cronológico, não database)
+  page "Tracker": **To-Dos** (database, board por Status — o único database),
+  **Brag document** (page — entregas diárias, headers por dia + bullets) e
+  **1-on-1** (page — conversas contínuas, headers por data + callouts). Regra:
+  gestão de fluxo vira database; registro/narrativa vira page
 - **Tracking** — rastreio de entregas (Jira, commits/PRs) — futuro: append de bullet
   no Brag document via API de blocks
-- **OneOnOnes** — parsing de transcrições de 1-on-1 — futuro:
-  `app/domains/one_on_ones/README.md`
+- **OneOnOnes** — parsing de transcrições de 1-on-1 — futuro: append do resumo na
+  page 1-on-1 via API de blocks; o action item vira row no To-Dos
 
 ## Linguagem
 
