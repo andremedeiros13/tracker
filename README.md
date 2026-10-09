@@ -35,20 +35,22 @@ notificação**: 1 notificação por ciclo com o resumo das pendências
 
 ## 🗂️ Setup do Notion (2 passos, uma vez só)
 
-1. **Crie o Database "To-Dos"** no Notion com exatamente estas propriedades:
+1. **Crie a page "Tracker"** e dentro dela o **Database "To-Dos"** com exatamente
+   estas propriedades:
 
    | Propriedade | Tipo | Opções |
    |---|---|---|
    | `Name` | Title | — |
-   | `Status` | Status | `Pendente`, `Snoozed`, `Concluída` |
+   | `Status` | Status | `Pendente`, `Em andamento`, `Concluída` |
    | `Origem` | Select | `Manual`, `Via Jira`, `Via Transcrição` |
    | `Snoozed até` | Date | **com hora** (para snooze preciso) |
 
    O boot valida o schema contra o esperado e **falha cedo** se divergir.
+   (Na view do Database, mude para **Board** agrupado por `Status`.)
 
 2. **Conecte a integration ao Database**: crie uma connection interna em
    [notion.so/profile/integrations](https://www.notion.so/profile/integrations),
-   copie o token, e no Database use o menu **••• → Add connections** para dar acesso.
+   copie o token, e na page "Tracker" use o menu **••• → Connections** para dar acesso.
 
 ## 🚀 Instalação
 
@@ -85,14 +87,31 @@ O daemon fica rodando em segundo plano: serve só o health check
 (padrão: a cada 45 min, das 09:00 às 18:00).
 
 **A fila de atenção é o Notion** — abra o Database "To-Dos" e veja suas pendências
-ordenadas pelo que vence primeiro. Para concluir ou snoozar, edite direto no Notion:
+no board agrupado por Status. Para concluir ou snoozar, edite direto no Notion:
 
 - **Concluir** → `Status: Concluída` (some da fila)
-- **Snoozar** → `Status: Snoozed` + `Snoozed até` com horário no futuro
+- **Snoozar** → `Status: Em andamento` + `Snoozed até` com horário no futuro
   (silencia o lembrete; volta quando o horário vence)
 
 A detecção de mudanças é **polling incremental** — dentro do intervalo, o daemon
 lê as pages que mudaram e notifica.
+
+### A estrutura no Notion (page "Tracker")
+
+```
+📄 Tracker (page)
+   ├── 🗂️ To-Dos (child database — board por Status)  ← a fila de atenção (POC)
+   ├── 🗣️ 1-on-1 (child database — tabela por Data)   ← transcrições (módulo futuro)
+   └── 📄 Brag document (child page)                   ← entregas diárias (módulo futuro)
+```
+
+- **To-Dos** é um **database**: gestão de fluxo — arrasta o card entre colunas para
+  mudar o estado, o daemon notifica no ciclo.
+- **Brag document** é uma **page** (não database): o registro do que você entregou —
+  headers por dia, bullets por entrega. Log cronológico, não board. O módulo
+  Tracking (futuro) adiciona o bullet via API de blocks; você narra o impacto à mão.
+- **1-on-1** é um **database**: transcrições com propriedades estruturadas
+  (Data, Resumo, Action items) — o parsing do módulo futuro escreve lá.
 
 ---
 
