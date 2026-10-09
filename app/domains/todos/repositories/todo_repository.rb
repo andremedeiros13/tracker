@@ -15,7 +15,7 @@ module Todos
       # snoozed cujo horário já venceu), ordenadas pelo que vence primeiro.
       def notificaveis_agora
         @client.query_database(
-          filter: { or: %w[Pendente Snoozed].map { |nome| { property: "Status", status: { equals: nome } } } }
+          filter: { or: [ "Pendente", "Em andamento" ].map { |nome| { property: "Status", status: { equals: nome } } } }
         ).map { |page| @mapper.from_page(page) }
          .select(&:lembrete_ativo?)
          .sort_by { |t| t.snoozed_until || t.created_at }
