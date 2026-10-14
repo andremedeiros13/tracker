@@ -1,7 +1,6 @@
-# Contexto: OneOnOnes (futuro)
+# Contexto: OneOnOnes
 
-Bounded context para o histórico de 1-on-1 e parsing de transcrições — **fora do
-escopo da POC**, implementado após a validação dos critérios de sucesso.
+Bounded context para o histórico de 1-on-1 e parsing de transcrições.
 
 ## O que este contexto receberá
 

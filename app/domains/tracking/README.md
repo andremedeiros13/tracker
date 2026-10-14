@@ -1,7 +1,6 @@
-# Contexto: Tracking (futuro)
+# Contexto: Tracking
 
-Bounded context para o rastreio de entregas diárias — **fora do escopo da POC**,
-implementado após a validação dos critérios de sucesso.
+Bounded context para o rastreio de entregas diárias.
 
 ## O que este contexto receberá
 

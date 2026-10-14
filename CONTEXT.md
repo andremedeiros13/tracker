@@ -6,7 +6,7 @@ para quebrar o estado de hiperfoco.
 
 ## Domínios (bounded contexts)
 
-- **Todos** — painel de To-Do e ciclo de notificação (a POC). Glossário:
+- **Todos** — painel de To-Do e ciclo de notificação. Glossário:
   `app/domains/todos/CONTEXT.md`
 - **Frontend**: o Notion — os Databases do Notion são a UI da fila de atenção **e** a
   fonte da verdade ([ADR 0001](docs/adr/0001-notion-como-frontend.md)). Estrutura na

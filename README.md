@@ -100,7 +100,7 @@ lê as pages que mudaram e notifica.
 
 ```
 📄 Tracker (page)
-   ├── 🗂️ To-Dos (child database — board por Status)  ← a fila de atenção (POC)
+   ├── 🗂️ To-Dos (child database — board por Status)  ← a fila de atenção
    ├── 📄 Brag document (child page)                   ← entregas diárias (módulo futuro)
    └── 🗣️ 1-on-1 (child page)                          ← conversas contínuas (módulo futuro)
 ```
@@ -202,10 +202,10 @@ Veja [CONTRIBUTING.md](CONTRIBUTING.md) para a estrutura do código.
 
 - **Decisões**: [ADR 0001 — Notion como frontend](docs/adr/0001-notion-como-frontend.md)
   e [wayfinder map](https://github.com/andremedeiros13/tracker/issues/1)
-- **Módulos futuros** (após a validação da POC): rastreio de entregas
+- **Próximos módulos**: rastreio de entregas
   (Jira + commits/PRs) e parsing de transcrições de 1-on-1
 - **Sem IA/LLM**: todo parsing é nativo da aplicação
 
 ---
 
-<sub>POC · Rails 8 · daemon no host · Notion como frontend e fonte da verdade · notificações nativas</sub>
+<sub>Rails 8 · daemon no host · Notion como frontend e fonte da verdade · notificações nativas</sub>
