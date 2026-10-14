@@ -14,3 +14,8 @@
 # ActiveSupport::Inflector.inflections(:en) do |inflect|
 #   inflect.acronym "RESTful"
 # end
+
+# Acrônimos do domínio — Tracker::GitHub (não Tracker::Github) e Tracker::Jira.
+ActiveSupport::Inflector.inflections(:en) do |inflect|
+  inflect.acronym "GitHub"
+end

@@ -63,9 +63,21 @@ cd tracker
 cat > .env <<'EOF'
 TRACER_NOTION_TOKEN=secret_xxx
 TRACER_NOTION_DATABASE_ID=xxx
+TRACER_NOTION_BRAG_PAGE_ID=xxx
 TRACER_NOTIFY_INTERVAL_MINUTES=45
 TRACER_NOTIFY_ACTIVE_START=09:00
 TRACER_NOTIFY_ACTIVE_END=18:00
+
+# Tracking (entregas do dia no Brag document) — Jira e GitHub
+JIRA_EMAIL=me@example.com
+JIRA_API_TOKEN=secret_xxx
+JIRA_SITE=https://rdstation.atlassian.net
+JIRA_ACCOUNT_ID=xxx
+# opcional — rastreio do campo Reviewer (descubra o id: rake tracking:discover_reviewer)
+JIRA_REVIEWER_FIELD_ID=customfield_10000
+GITHUB_ORG=ResultadosDigitais
+# opcional — sem GITHUB_TOKEN, o token do gh CLI é usado
+#GITHUB_TOKEN=ghp_xxx
 EOF
 
 # 3. Setup — instala gems e testa as notificações
@@ -101,7 +113,7 @@ lê as pages que mudaram e notifica.
 ```
 📄 Tracker (page)
    ├── 🗂️ To-Dos (child database — board por Status)  ← a fila de atenção
-   ├── 📄 Brag document (child page)                   ← entregas diárias (módulo futuro)
+   ├── 📄 Brag document (child page)                   ← entregas diárias (Tracking)
    └── 🗣️ 1-on-1 (child page)                          ← conversas contínuas (módulo futuro)
 ```
 
@@ -110,7 +122,8 @@ lê as pages que mudaram e notifica.
   filtro por Status.
 - **Brag document** é uma **page** (não database): o registro do que você entregou —
   headers por dia, bullets por entrega. Log cronológico, não board. O módulo
-  Tracking (futuro) adiciona o bullet via API de blocks; você narra o impacto à mão.
+  Tracking appenda o bullet via API de blocks (com link clicável); você narra o impacto
+  à mão.
 - **1-on-1** é uma **page** (não database): as conversas em formato contínuo —
   header da data, narrativa da conversa, action items em callout (que viram rows
   no To-Dos). O módulo OneOnOnes (futuro) faz o append do resumo da transcrição
@@ -118,6 +131,25 @@ lê as pages que mudaram e notifica.
 
 A regra: **o que é gestão de fluxo vira database; o que é registro ou narrativa vira
 page** — cada formato segue o propósito.
+
+### 📦 Tracking — entregas do dia no Brag document
+
+O daemon coleta as suas entregas e appenda no Brag document (page no Notion):
+
+- **Jira**: cards que você moveu no dia (mudança de Status no changelog) e o campo
+  **Reviewer** (customfield — `rake tracking:discover_reviewer` acha o id)
+- **GitHub**: PRs que você abriu, PRs que você revisou e seus commits na org
+- **Ciclo**: no mesmo intervalo das notificações, o daemon coleta o dia e appenda
+  **só as entregas que ainda não estão** (dedup incremental — nada fica pra trás)
+
+```bash
+rake tracking:report               # coleta agora e appenda (útil p/ testar)
+rake tracking:discover_reviewer    # acha o customfield id do Reviewer
+```
+
+Sem credenciais do Jira/GitHub no .env, a coleta correspondente é pulada sem erro
+(o ciclo de notificação segue funcionando). Cada bullet tem link clicável para o
+card/PR/commit de origem.
 
 ---
 
@@ -202,8 +234,8 @@ Veja [CONTRIBUTING.md](CONTRIBUTING.md) para a estrutura do código.
 
 - **Decisões**: [ADR 0001 — Notion como frontend](docs/adr/0001-notion-como-frontend.md)
   e [wayfinder map](https://github.com/andremedeiros13/tracker/issues/1)
-- **Próximos módulos**: rastreio de entregas
-  (Jira + commits/PRs) e parsing de transcrições de 1-on-1
+- **Próximos módulos**: parsing de transcrições de 1-on-1
+  (o Tracking — entregas do dia — já está implementado)
 - **Sem IA/LLM**: todo parsing é nativo da aplicação
 
 ---

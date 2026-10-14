@@ -6,7 +6,7 @@ require "json"
 module Tracker
   module Notion
     # Cliente HTTP puro do Notion (ADR 0001 — sem gem de terceiro no seam).
-    # A superfície usada é pequena: GET database, POST query, (PATCH page).
+    # A superfície usada é pequena: GET database, POST query, POST blocks, (PATCH page).
     class Client
       BASE = "https://api.notion.com/v1"
       VERSION = "2022-06-28"
@@ -39,10 +39,31 @@ module Tracker
         pages
       end
 
+      # Appenda blocks filhos na page (POST /blocks/{page_id}/children) — o
+      # Tracking usa para adicionar header/bullets no Brag document.
+      def append_block_children(page_id, children)
+        request(:Post, "/blocks/#{page_id}/children", body: { children: })
+      end
+
+      # Paginação por cursor (has_more/start_cursor, 100/página — API Free).
+      def block_children(page_id)
+        blocks = []
+        cursor = nil
+        loop do
+          body = request(:Get, "/blocks/#{page_id}/children",
+                         query: { page_size: 100, start_cursor: cursor }.compact)
+          blocks.concat(body.fetch("results"))
+          break unless body.fetch("has_more")
+          cursor = body.fetch("next_cursor")
+        end
+        blocks
+      end
+
       private
 
-      def request(method, path, body: nil)
+      def request(method, path, body: nil, query: nil)
         uri = URI("#{BASE}#{path}")
+        uri.query = URI.encode_www_form(query) if query&.any?
         req = Net::HTTP.const_get(method).new(uri)
         req["Authorization"] = "Bearer #{@token}"
         req["Notion-Version"] = VERSION

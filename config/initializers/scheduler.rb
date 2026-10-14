@@ -37,6 +37,15 @@ module Tracker
       return unless periodo_ativo?
 
       Todos::UseCases::NotifyPendingTodos.new.call
+      coletar_entregas
+    end
+
+    # Ciclo do Tracking: coleta as entregas do dia e appenda no Brag document
+    # (dedup incremental). Resgatado — nunca derruba o ciclo de notificação.
+    def coletar_entregas
+      Tracking::UseCases::CollectTodaysDeliveries.new.call
+    rescue StandardError => e
+      Rails.logger.error("[tracker-scheduler] tracking: #{e.class}: #{e.message}")
     end
 
     def periodo_ativo?
