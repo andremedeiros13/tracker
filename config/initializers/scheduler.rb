@@ -38,6 +38,7 @@ module Tracker
 
       Todos::UseCases::NotifyPendingTodos.new.call
       coletar_entregas
+      importar_transcricoes
     end
 
     # Ciclo do Tracking: coleta as entregas do dia e appenda no Brag document
@@ -46,6 +47,14 @@ module Tracker
       Tracking::UseCases::CollectTodaysDeliveries.new.call
     rescue StandardError => e
       Rails.logger.error("[tracker-scheduler] tracking: #{e.class}: #{e.message}")
+    end
+
+    # Ciclo do OneOnOnes: importa os .md soltos na pasta monitorada, appenda
+    # o resumo na page 1-on-1 e cria To-Dos dos action items meus. Resgatado.
+    def importar_transcricoes
+      OneOnOnes::UseCases::ImportTranscription.new.call
+    rescue StandardError => e
+      Rails.logger.error("[tracker-scheduler] one-on-ones: #{e.class}: #{e.message}")
     end
 
     def periodo_ativo?

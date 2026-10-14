@@ -40,7 +40,7 @@ module Tracking
         when :github
           (@github || Repositories::GitHubDeliveryRepository.new).entregas_do_dia(day)
         end
-      rescue Tracker::Error, KeyError => e
+      rescue Tracker::Error, Tracker::Notion::Error, KeyError => e
         @logger.error("[tracking] #{fonte}: #{e.class}: #{e.message}")
         []
       end

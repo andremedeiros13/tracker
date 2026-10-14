@@ -6,7 +6,8 @@ require "json"
 module Tracker
   module Notion
     # Cliente HTTP puro do Notion (ADR 0001 — sem gem de terceiro no seam).
-    # A superfície usada é pequena: GET database, POST query, POST blocks, (PATCH page).
+    # A superfície usada é pequena: GET database, POST query, POST pages,
+    # POST/GET blocks, (PATCH page).
     class Client
       BASE = "https://api.notion.com/v1"
       VERSION = "2022-06-28"
@@ -37,6 +38,12 @@ module Tracker
           cursor = body.fetch("next_cursor")
         end
         pages
+      end
+
+      # Cria uma row no database (POST /pages) — o OneOnOnes usa para criar
+      # To-Dos dos action items das transcrições.
+      def create_page(database_id:, properties:)
+        request(:Post, "/pages", body: { parent: { database_id: }, properties: })
       end
 
       # Appenda blocks filhos na page (POST /blocks/{page_id}/children) — o

@@ -64,6 +64,7 @@ cat > .env <<'EOF'
 TRACER_NOTION_TOKEN=secret_xxx
 TRACER_NOTION_DATABASE_ID=xxx
 TRACER_NOTION_BRAG_PAGE_ID=xxx
+TRACER_NOTION_ONE_ON_ONES_PAGE_ID=xxx
 TRACER_NOTIFY_INTERVAL_MINUTES=45
 TRACER_NOTIFY_ACTIVE_START=09:00
 TRACER_NOTIFY_ACTIVE_END=18:00
@@ -78,6 +79,11 @@ JIRA_REVIEWER_FIELD_ID=customfield_10000
 GITHUB_ORG=ResultadosDigitais
 # opcional — sem GITHUB_TOKEN, o token do gh CLI é usado
 #GITHUB_TOKEN=ghp_xxx
+
+# OneOnOnes (transcrições de 1-on-1)
+TRACER_ONE_ON_ONES_DIR=/home/voce/Downloads/one-on-ones
+# seu nome nas transcrições (matching parcial — "André Medeiros" ou "André")
+TRACER_ONE_ON_ONES_ME="André Medeiros"
 EOF
 
 # 3. Setup — instala gems e testa as notificações
@@ -114,7 +120,7 @@ lê as pages que mudaram e notifica.
 📄 Tracker (page)
    ├── 🗂️ To-Dos (child database — board por Status)  ← a fila de atenção
    ├── 📄 Brag document (child page)                   ← entregas diárias (Tracking)
-   └── 🗣️ 1-on-1 (child page)                          ← conversas contínuas (módulo futuro)
+   └── 🗣️ 1-on-1 (child page)                          ← conversas contínuas (OneOnOnes)
 ```
 
 - **To-Dos** é o único **database**: gestão de fluxo — arrasta o card entre colunas para
@@ -125,9 +131,9 @@ lê as pages que mudaram e notifica.
   Tracking appenda o bullet via API de blocks (com link clicável); você narra o impacto
   à mão.
 - **1-on-1** é uma **page** (não database): as conversas em formato contínuo —
-  header da data, narrativa da conversa, action items em callout (que viram rows
-  no To-Dos). O módulo OneOnOnes (futuro) faz o append do resumo da transcrição
-  via API de blocks.
+  header da data, título da reunião, resumo e action items (✅ meus, 👤 dos outros).
+  O módulo OneOnOnes appenda o resumo da transcrição via API de blocks; os action
+  items seus viram rows no To-Dos.
 
 A regra: **o que é gestão de fluxo vira database; o que é registro ou narrativa vira
 page** — cada formato segue o propósito.
@@ -150,6 +156,23 @@ rake tracking:discover_reviewer    # acha o customfield id do Reviewer
 Sem credenciais do Jira/GitHub no .env, a coleta correspondente é pulada sem erro
 (o ciclo de notificação segue funcionando). Cada bullet tem link clicável para o
 card/PR/commit de origem.
+
+### 🗣️ OneOnOnes — transcrições de 1-on-1
+
+Solte o .md do Meet ("Anotações do Gemini") na pasta monitorada
+(`TRACER_ONE_ON_ONES_DIR`) — o daemon importa sozinho no ciclo:
+
+- **Parser nativo** (sem IA/LLM): extrai as reuniões, o resumo (Resumo +
+  Decisões) e os action items dos checkboxes (`- [ ] [Nome] Descrição`)
+- **Resumo** appenado na page 1-on-1 (header do dia + título + resumo)
+- **Action items seus** (matching parcial com `TRACER_ONE_ON_ONES_ME`) viram
+  rows no To-Dos com origem `Via Transcrição`; dos outros ficam no histórico (👤)
+- **Arquivo importado** vai para `importados/` dentro da pasta — nunca
+  re-importado
+
+```bash
+rake one_on_ones:import    # importa agora (útil p/ testar)
+```
 
 ---
 
@@ -234,8 +257,8 @@ Veja [CONTRIBUTING.md](CONTRIBUTING.md) para a estrutura do código.
 
 - **Decisões**: [ADR 0001 — Notion como frontend](docs/adr/0001-notion-como-frontend.md)
   e [wayfinder map](https://github.com/andremedeiros13/tracker/issues/1)
-- **Próximos módulos**: parsing de transcrições de 1-on-1
-  (o Tracking — entregas do dia — já está implementado)
+- **Próximos módulos**: nenhum — os três domínios (Todos, Tracking, OneOnOnes)
+  estão implementados
 - **Sem IA/LLM**: todo parsing é nativo da aplicação
 
 ---
