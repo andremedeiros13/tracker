@@ -65,8 +65,8 @@ module OneOnOnes
         marcador = item.mine? ? "✅" : "👤"
         {
           object: "block",
-          type: "bulleted_list",
-          bulleted_list: {
+          type: "bulleted_list_item",
+          bulleted_list_item: {
             rich_text: [ { type: "text", text: { content: "#{marcador} [#{item.owner}] #{item.description}" } } ]
           }
         }

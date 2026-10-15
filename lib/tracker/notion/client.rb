@@ -46,10 +46,13 @@ module Tracker
         request(:Post, "/pages", body: { parent: { database_id: }, properties: })
       end
 
-      # Appenda blocks filhos na page (POST /blocks/{page_id}/children) — o
+      # Appenda blocks filhos na page (PATCH /blocks/{page_id}/children) — o
       # Tracking usa para adicionar header/bullets no Brag document.
+      # PATCH e não POST: no workspace do usuário, o POST nesse path responde
+      # 400 invalid_request_url em toda page (anomalia da API, testada em
+      # 2026-10-15 com curl e Net::HTTP); o PATCH no mesmo path appenda.
       def append_block_children(page_id, children)
-        request(:Post, "/blocks/#{page_id}/children", body: { children: })
+        request(:Patch, "/blocks/#{page_id}/children", body: { children: })
       end
 
       # Paginação por cursor (has_more/start_cursor, 100/página — API Free).

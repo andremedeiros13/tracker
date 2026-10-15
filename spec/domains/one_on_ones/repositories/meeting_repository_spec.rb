@@ -42,10 +42,10 @@ RSpec.describe OneOnOnes::Repositories::MeetingRepository do
           rich_text: [ hash_including(text: hash_including(content: "1:1 André / Spalenza")) ]
         )),
         *Array.new(1) { hash_including(type: "paragraph") },
-        hash_including(type: "bulleted_list", bulleted_list: hash_including(
+        hash_including(type: "bulleted_list_item", bulleted_list_item: hash_including(
           rich_text: [ hash_including(text: hash_including(content: a_string_including("✅ [André Medeiros]"))) ]
         )),
-        hash_including(type: "bulleted_list", bulleted_list: hash_including(
+        hash_including(type: "bulleted_list_item", bulleted_list_item: hash_including(
           rich_text: [ hash_including(text: hash_including(content: a_string_including("👤 [Rodolfo Spalenza]"))) ]
         ))
       ])
