@@ -3,183 +3,106 @@
 > 🔔 To-Do no **Notion** com **notificações nativas do sistema** — para quebrar o
 > hiperfoco e lembrar das pendências que importam.
 
-O Tracker roda como um **daemon no seu computador**: um processo de fundo que lê
-seus To-Dos de um **Database do Notion** (a UI da fila de atenção **e** a fonte da
-verdade — [ADR 0001](docs/adr/0001-notion-como-frontend.md)) e lembra você via
-**notificações nativas** (Linux, macOS, Windows).
+Um daemon que roda no seu computador. Você gerencia as tarefas **no Notion**;
+o daemon notifica você no intervalo configurado e automatiza três coisas:
 
-Você edita as tarefas direto no Notion; o backend foca só no **ciclo de
-notificação**: 1 notificação por ciclo com o resumo das pendências
-("3 pendências: via Jira, manual"), nunca uma por tarefa.
+1. **Notificações** — 1 lembrete por ciclo com o resumo das pendências
+2. **Tracking** — suas entregas do dia (Jira + GitHub) registradas no Brag document
+3. **1-on-1s** — transcrições do Meet importadas para o histórico no Notion
 
----
+## Estrutura no Notion
 
-## ✅ Pré-requisitos
-
-| Requisito | Como verificar |
-|---|---|
-| **Ruby 4.x** | `ruby --version` → precisa mostrar `4.0.x` ou superior |
-| **Linux**: `notify-send` | `which notify-send` (já vem na maioria das distros) |
-| **Notion Free** (ou superior) | a API funciona no plano Free — ver [Limites](https://developers.notion.com/reference/request-limits) |
-
-<details>
-<summary><b>Instalar o Ruby (só se você não tiver)</b></summary>
-
-- **Linux (Debian/Ubuntu)**: `sudo apt install ruby-full`
-- **macOS**: `brew install ruby` (ou use `asdf`/`rbenv`)
-- **Windows**: [RubyInstaller](https://rubyinstaller.org/) (versão + Devkit)
-
-</details>
-
----
-
-## 🗂️ Setup do Notion (2 passos, uma vez só)
-
-1. **Crie a page "Tracker"** e dentro dela o **Database "To-Dos"** com exatamente
-   estas propriedades:
-
-   | Propriedade | Tipo | Opções |
-   |---|---|---|
-   | `Name` | Title | — |
-   | `Status` | Status | `Pendente`, `Em andamento`, `Concluída` |
-   | `Origem` | Select | `Manual`, `Via Jira`, `Via Transcrição` |
-   | `Snoozed até` | Date | **com hora** (para snooze preciso) |
-
-   O boot valida o schema contra o esperado e **falha cedo** se divergir.
-   (Na view do Database, mude para **Board** agrupado por `Status`.)
-
-2. **Conecte a integration ao Database**: crie uma connection interna em
-   [notion.so/profile/integrations](https://www.notion.so/profile/integrations),
-   copie o token, e na page "Tracker" use o menu **••• → Connections** para dar acesso.
-
-## 🚀 Instalação
-
-```bash
-# 1. Clone o repositório
-git clone git@github.com:andremedeiros13/tracker.git
-cd tracker
-
-# 2. Configure as credenciais (export no shell ou .env — carregado pelo bin/start)
-cat > .env <<'EOF'
-TRACER_NOTION_TOKEN=secret_xxx
-TRACER_NOTION_DATABASE_ID=xxx
-TRACER_NOTION_BRAG_PAGE_ID=xxx
-TRACER_NOTION_ONE_ON_ONES_PAGE_ID=xxx
-TRACER_NOTIFY_INTERVAL_MINUTES=45
-TRACER_NOTIFY_ACTIVE_START=09:00
-TRACER_NOTIFY_ACTIVE_END=18:00
-
-# Tracking (entregas do dia no Brag document) — Jira e GitHub
-JIRA_EMAIL=me@example.com
-JIRA_API_TOKEN=secret_xxx
-JIRA_SITE=https://rdstation.atlassian.net
-JIRA_ACCOUNT_ID=xxx
-# opcional — rastreio do campo Reviewer (descubra o id: rake tracking:discover_reviewer)
-JIRA_REVIEWER_FIELD_ID=customfield_10000
-GITHUB_ORG=ResultadosDigitais
-# opcional — sem GITHUB_TOKEN, o token do gh CLI é usado
-#GITHUB_TOKEN=ghp_xxx
-
-# OneOnOnes (transcrições de 1-on-1)
-TRACER_ONE_ON_ONES_DIR=/home/voce/Downloads/one-on-ones
-# seu nome nas transcrições (matching parcial — "André Medeiros" ou "André")
-TRACER_ONE_ON_ONES_ME="André Medeiros"
-EOF
-
-# 3. Setup — instala gems e testa as notificações
-bin/setup
-```
-
-O `bin/setup` instala as dependências, valida o schema do Database no Notion e
-**dispara uma notificação de teste** — se ela aparecer no seu sistema, tudo certo.
-(No macOS/Windows, conceda a permissão quando o S.O. perguntar.)
-
-## ▶️ Execução
-
-```bash
-bin/start
-```
-
-O daemon fica rodando em segundo plano: serve só o health check
-(http://localhost:3000/up) e dispara o lembrete no intervalo configurado
-(padrão: a cada 45 min, das 09:00 às 18:00).
-
-**A fila de atenção é o Notion** — abra o Database "To-Dos" e veja suas pendências
-no board agrupado por Status. Para concluir ou snoozar, edite direto no Notion:
-
-- **Concluir** → `Status: Concluída` (some da fila)
-- **Snoozar** → `Status: Em andamento` + `Snoozed até` com horário no futuro
-  (silencia o lembrete; volta quando o horário vence)
-
-A detecção de mudanças é **polling incremental** — dentro do intervalo, o daemon
-lê as pages que mudaram e notifica.
-
-### A estrutura no Notion (page "Tracker")
+Crie uma page "Tracker" com esta estrutura (é a única configuração no Notion):
 
 ```
 📄 Tracker (page)
-   ├── 🗂️ To-Dos (child database — board por Status)  ← a fila de atenção
-   ├── 📄 Brag document (child page)                   ← entregas diárias (Tracking)
-   └── 🗣️ 1-on-1 (child page)                          ← conversas contínuas (OneOnOnes)
+   ├── 🗂️ To-Dos (database — board por Status)   ← a fila de atenção
+   ├── 📄 Brag document (page)                   ← entregas diárias
+   └── 🗣️ 1-on-1 (page)                          ← histórico de conversas
 ```
 
-- **To-Dos** é o único **database**: gestão de fluxo — arrasta o card entre colunas para
-  mudar o estado, o daemon notifica no ciclo. O que é fluxo pede estrutura: cards, drag,
-  filtro por Status.
-- **Brag document** é uma **page** (não database): o registro do que você entregou —
-  headers por dia, bullets por entrega. Log cronológico, não board. O módulo
-  Tracking appenda o bullet via API de blocks (com link clicável); você narra o impacto
-  à mão.
-- **1-on-1** é uma **page** (não database): as conversas em formato contínuo —
-  header da data, título da reunião, resumo e action items (✅ meus, 👤 dos outros).
-  O módulo OneOnOnes appenda o resumo da transcrição via API de blocks; os action
-  items seus viram rows no To-Dos.
+O database **To-Dos** precisa destas propriedades:
 
-A regra: **o que é gestão de fluxo vira database; o que é registro ou narrativa vira
-page** — cada formato segue o propósito.
+| Propriedade | Tipo | Opções |
+|---|---|---|
+| `Name` | Title | — |
+| `Status` | Status | `Pendente`, `Em andamento`, `Concluída` |
+| `Origem` | Select | `Manual`, `Via Jira`, `Via Transcrição` |
+| `Snoozed até` | Date | **com hora** (para snooze preciso) |
 
-### 📦 Tracking — entregas do dia no Brag document
+Depois, crie uma integration interna em
+[notion.so/profile/integrations](https://www.notion.so/profile/integrations),
+copie o token, e na page "Tracker" use **••• → Connections** para dar acesso.
 
-O daemon coleta as suas entregas e appenda no Brag document (page no Notion):
-
-- **Jira**: cards que você moveu no dia (mudança de Status no changelog) e o campo
-  **Reviewer** (customfield — `rake tracking:discover_reviewer` acha o id)
-- **GitHub**: PRs que você abriu, PRs que você revisou e seus commits na org
-- **Ciclo**: no mesmo intervalo das notificações, o daemon coleta o dia e appenda
-  **só as entregas que ainda não estão** (dedup incremental — nada fica pra trás)
+## Instalação
 
 ```bash
-rake tracking:report               # coleta agora e appenda (útil p/ testar)
-rake tracking:discover_reviewer    # acha o customfield id do Reviewer
+git clone git@github.com:andremedeiros13/tracker.git
+cd tracker
+
+# copie o exemplo e preencha — a última linha PRECISA terminar com quebra de linha
+cp .env.example .env
+$EDITOR .env
+
+bin/setup   # instala gems, valida o schema e dispara uma notificação de teste
+bin/start   # sobe o daemon
 ```
 
-Sem credenciais do Jira/GitHub no .env, a coleta correspondente é pulada sem erro
-(o ciclo de notificação segue funcionando). Cada bullet tem link clicável para o
-card/PR/commit de origem.
+> Os IDs das pages/database você pega no Notion: abra o item → **••• → Copy link**
+> → o ID é o UUID no fim da URL. `JIRA_ACCOUNT_ID` vem de
+> `https://SEU-JIRA/rest/api/3/myself` (campo `accountId`).
 
-### 🗣️ OneOnOnes — transcrições de 1-on-1
+Sem as credenciais do Jira/GitHub, o Tracking é pulado sem erro — as notificações
+funcionam só com o Notion.
 
-Solte o .md do Meet ("Anotações do Gemini") na pasta monitorada
-(`TRACER_ONE_ON_ONES_DIR`) — o daemon importa sozinho no ciclo:
+## Uso diário
 
-- **Parser nativo** (sem IA/LLM): extrai as reuniões, o resumo (Resumo +
-  Decisões) e os action items dos checkboxes (`- [ ] [Nome] Descrição`)
-- **Resumo** appenado na page 1-on-1 (header do dia + título + resumo)
-- **Action items seus** (matching parcial com `TRACER_ONE_ON_ONES_ME`) viram
-  rows no To-Dos com origem `Via Transcrição`; dos outros ficam no histórico (👤)
-- **Arquivo importado** vai para `importados/` dentro da pasta — nunca
-  re-importado
+**A fila de atenção é o Notion.** Abra o database "To-Dos" (view em Board,
+agrupado por `Status`) e edite direto nele:
+
+- **Concluir** → arraste para `Concluída` (some da fila)
+- **Snoozar** → arraste para `Em andamento` + preencha `Snoozed até` com horário
+  no futuro (silencia o lembrete até o horário vencer)
+
+O daemon roda em segundo plano (health check em http://localhost:3000/up). O ciclo
+dispara a cada 45 min, das 09:00 às 18:00 (configurável com `TRACER_NOTIFY_*`).
+
+### 1-on-1: solte o .md do Meet na pasta `one_on_ones/`
+
+A pasta **já vem com o projeto**, na raiz do repo (o conteúdo é ignorado pelo git).
+Solte nela o .md do Meet ("Anotações do Gemini") — o daemon importa sozinho no ciclo:
+
+- O **resumo** vai para a page 1-on-1 (header do dia, título, resumo, action items)
+- Os **action items seus** (matching parcial com `TRACER_ONE_ON_ONES_ME`) viram
+  rows no To-Dos com origem `Via Transcrição`
+- O arquivo importado vai para `one_on_ones/importados/` — nunca re-importado
+
+### Tracking: entregas do dia no Brag document
+
+A cada ciclo, o daemon coleta suas entregas do dia e appenda no Brag document
+(só o que ainda não está — dedup incremental):
+
+- **Jira**: cards que você moveu no dia + campo Reviewer
+- **GitHub**: PRs que você abriu, PRs que você revisou, seus commits na org
+
+Cada bullet tem link clicável para o card/PR/commit de origem; o impacto você
+narra à mão.
+
+## Comandos
 
 ```bash
-rake one_on_ones:import    # importa agora (útil p/ testar)
+bin/start                          # sobe o daemon
+rake tracking:report               # coleta as entregas agora (útil p/ testar)
+rake tracking:discover_reviewer    # acha o id do customfield Reviewer no Jira
+rake one_on_ones:import            # importa as transcrições agora (útil p/ testar)
 ```
 
----
+> O `rake` não carrega o `.env` — rode antes: `set -a; source .env; set +a`
 
-## 🖥️ Rodar no login (opcional, recomendado)
+## Rodar no login (opcional, recomendado)
 
 Se o daemon não sobe no login, você precisa lembrar de iniciar — o que mata o
-propósito. Registre-o para iniciar sozinho:
+propósito.
 
 <details>
 <summary><b>Linux (systemd user unit)</b></summary>
@@ -190,7 +113,7 @@ cp dist/tracker.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now tracker.service
 
-# (opcional) fazer o daemon sobreviver ao logout:
+# (opcional) sobreviver ao logout:
 sudo loginctl enable-linger $USER
 ```
 
@@ -243,7 +166,7 @@ Register-ScheduledTask -TaskName "Tracker" -Action $action -Trigger $trigger
 
 ---
 
-## 🧪 Qualidade (para contribuir)
+## Contribuir
 
 ```bash
 bundle exec rubocop        # lint + formatação
@@ -251,16 +174,7 @@ bundle exec rspec          # specs (fakes/stubs — zero rede)
 bundle exec brakeman       # security scan
 ```
 
-Veja [CONTRIBUTING.md](CONTRIBUTING.md) para a estrutura do código.
-
-## 🗺️ O projeto
-
-- **Decisões**: [ADR 0001 — Notion como frontend](docs/adr/0001-notion-como-frontend.md)
-  e [wayfinder map](https://github.com/andremedeiros13/tracker/issues/1)
-- **Próximos módulos**: nenhum — os três domínios (Todos, Tracking, OneOnOnes)
-  estão implementados
-- **Sem IA/LLM**: todo parsing é nativo da aplicação
-
----
+Decisões de design: [ADR 0001 — Notion como frontend](docs/adr/0001-notion-como-frontend.md).
+Estrutura do código: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 <sub>Rails 8 · daemon no host · Notion como frontend e fonte da verdade · notificações nativas</sub>
