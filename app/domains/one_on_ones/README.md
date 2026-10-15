@@ -8,9 +8,10 @@ database To-Dos, origem "Via Transcrição").
 
 ## O que este contexto faz
 
-- **Importação por pasta monitorada** (ENV `TRACER_ONE_ON_ONES_DIR`): o daemon
-  importa sozinho os .md soltos nela; arquivo importado vai para `importados/`
-  (nunca re-importado)
+- **Importação por pasta monitorada** (default: `one_on_ones/` na raiz do repo,
+  commitada vazia — o conteúdo é ignorado pelo git; ENV `TRACER_ONE_ON_ONES_DIR`
+  sobrepõe): o daemon importa sozinho os .md soltos nela; arquivo importado vai
+  para `importados/` (nunca re-importado)
 - **Parser nativo (sem IA/LLM)**: a estrutura é regular e detectável sem IA —
   - Cabeçalho: data + título + convidados (mailto: links)
   - `### Resumo`, `### Decisões` — bullets dos temas (viram o resumo)

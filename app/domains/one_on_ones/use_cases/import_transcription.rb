@@ -3,14 +3,17 @@
 module OneOnOnes
   module UseCases
     # O ciclo do OneOnOnes: importa os .md soltos na pasta monitorada (ENV
-    # TRACER_ONE_ON_ONES_DIR), extrai resumo + action items (parser nativo),
-    # appenda o resumo na page 1-on-1 e cria To-Dos dos action items meus
-    # (matching parcial do nome — ENV TRACER_ONE_ON_ONES_ME). O arquivo
-    # importado vai para "importados/" — nunca re-importado.
+    # TRACER_ONE_ON_ONES_DIR, default: one_on_ones/ na raiz do repo), extrai
+    # resumo + action items (parser nativo), appenda o resumo na page 1-on-1
+    # e cria To-Dos dos action items meus (matching parcial do nome — ENV
+    # TRACER_ONE_ON_ONES_ME). O arquivo importado vai para "importados/" —
+    # nunca re-importado.
     #
     # Erro é resgatado e logado — nunca derruba o ciclo do scheduler.
     class ImportTranscription
-      def initialize(dir: ENV["TRACER_ONE_ON_ONES_DIR"],
+      DEFAULT_DIR = Rails.root.join("one_on_ones")
+
+      def initialize(dir: ENV["TRACER_ONE_ON_ONES_DIR"] || DEFAULT_DIR,
                      parser: ParseTranscription.new,
                      meetings: Repositories::MeetingRepository.new,
                      todos: Repositories::TodoCreationRepository.new,

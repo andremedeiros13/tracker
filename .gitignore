@@ -7,8 +7,9 @@
 # Ignore bundler config.
 /.bundle
 
-# Ignore all environment files.
+# Ignore all environment files (o .env.example é commitado).
 /.env*
+!/.env.example
 
 # Ignore all logfiles and tempfiles.
 /log/*
@@ -33,6 +34,10 @@
 # Ignore key files for decrypting credentials and more.
 /config/*.key
 
+
+# Transcrições 1-on-1 (dados pessoais — a pasta vem com o projeto, o conteúdo não)
+/one_on_ones/*
+!/one_on_ones/.gitkeep
 
 # Tooling de sessão (não é do projeto)
 /.claude/
