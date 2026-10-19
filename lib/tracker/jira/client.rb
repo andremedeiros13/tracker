@@ -39,7 +39,7 @@ module Tracker
         issues = []
         token = nil
         loop do
-          query = { jql:, maxResults: 50 }
+          query = { jql:, maxResults: 50, fields: "key,summary" }
           query[:nextPageToken] = token if token
           body = request(:Get, "/rest/api/3/search/jql", query:)
           issues.concat(body.fetch("issues"))
