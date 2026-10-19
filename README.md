@@ -119,6 +119,10 @@ sudo loginctl enable-linger $USER
 
 Logs: `journalctl --user -u tracker.service -f`
 
+O unit roda com PATH mínimo, então o `bin/start` resolve o Ruby sozinho: se houver
+asdf (`~/.asdf`), ele lê o `.tool-versions` e usa o Ruby de lá. Com outro version
+manager (rbenv, mise…), ajuste o PATH no `bin/start` ou exporte no unit.
+
 </details>
 
 <details>
