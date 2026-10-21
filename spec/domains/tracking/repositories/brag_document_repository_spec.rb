@@ -115,6 +115,60 @@ RSpec.describe Tracking::Repositories::BragDocumentRepository do
       expect(lotes.last.last).to eq("x3-100")
     end
 
+    it "não grava signature nil quando a API devolve mais ids que blocos" do
+      allow(client).to receive(:block_children).and_return([])
+      allow(client).to receive(:append_block_children) do |_page, children, after: nil|
+        { "results" => Array.new(children.size + 1) { |i| { "id" => "x#{i}" } } }
+      end
+      allow(client).to receive(:delete_block)
+
+      repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos("a"))
+
+      assinaturas = ledger.day(dia)[:blocks].map { |b| b[:signature] }
+      expect(assinaturas).to all(be_a(String))
+      expect(assinaturas.size).to eq(1)
+    end
+
+    it "reaproveita o sentinel já existente em vez de criar outro" do
+      sentinel_existente = { "id" => "s-antigo", "type" => "paragraph",
+                             "paragraph" => { "rich_text" => [ { "plain_text" => Tracking::Renderers::BragBlocks::SENTINEL } ] } }
+      cabecalho = { "id" => "h-1", "type" => "heading_2",
+                    "heading_2" => { "rich_text" => [ { "plain_text" => "21/10/2026 — quarta" } ] } }
+      sequencia = 0
+      allow(client).to receive(:block_children).and_return([ cabecalho, sentinel_existente ])
+      allow(client).to receive(:append_block_children) do |_page, children, after: nil|
+        sequencia += 1
+        { "results" => [ { "id" => "novo-#{sequencia}" } ] }
+      end
+      allow(client).to receive(:delete_block)
+
+      repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos("a"))
+
+      # Só o body foi escrito: o sentinel não foi recriado.
+      expect(client).to have_received(:append_block_children).once
+      expect(ledger.day(dia)[:sentinel_id]).to eq("s-antigo")
+    end
+
+    it "sem ledger mas com sentinel, adota os blocos da seção (não duplica)" do
+      cabecalho = { "id" => "h-1", "type" => "heading_2",
+                    "heading_2" => { "rich_text" => [ { "plain_text" => "21/10/2026 — quarta" } ] } }
+      sentinel_existente = { "id" => "s-1", "type" => "paragraph",
+                             "paragraph" => { "rich_text" => [ { "plain_text" => Tracking::Renderers::BragBlocks::SENTINEL } ] } }
+      orfao = { "id" => "b-antigo", "type" => "bulleted_list_item",
+                "bulleted_list_item" => { "rich_text" => [ { "plain_text" => "conteúdo gerado antes" } ] } }
+      vizinho = { "id" => "h-2", "type" => "heading_2",
+                  "heading_2" => { "rich_text" => [ { "plain_text" => "22/10/2026 — quinta" } ] } }
+      allow(client).to receive(:block_children).and_return([ cabecalho, sentinel_existente, orfao, vizinho ])
+      allow(client).to receive(:append_block_children) { |_p, c, after: nil| { "results" => c.map { |_| { "id" => "novo" } } } }
+      allow(client).to receive(:delete_block)
+
+      repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos("a"))
+
+      # O bloco gerado antes (abaixo do sentinel) foi apagado; o de outro dia não.
+      expect(client).to have_received(:delete_block).with("b-antigo")
+      expect(client).not_to have_received(:delete_block).with("h-2")
+    end
+
     it "dia vazio ainda grava sentinel e limpa o body" do
       stub_client
       repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos("a"))

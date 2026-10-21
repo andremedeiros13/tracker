@@ -96,7 +96,9 @@ module Tracking
       # "#2301 · " + título (link) + " — MERGEADO 16:48" (ou "card de Itallo").
       def texto_do_item(item)
         textos = [ { type: "text", text: { content: "#{item.referencia} · " } } ]
-        textos << { type: "text", text: { content: item.title }, link: { url: item.url } }
+        # O link vai DENTRO de `text` — ao lado, a API responde 400
+        # ("rich_text[1].link should be not present").
+        textos << { type: "text", text: { content: item.title, link: { url: item.url } } }
         if (sufixo = sufixo_de_estado(item))
           textos << { type: "text", text: { content: " — #{sufixo}" }, annotations: { bold: true } }
         end

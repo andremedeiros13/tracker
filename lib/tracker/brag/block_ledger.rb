@@ -21,8 +21,29 @@ module Tracker
 
       def initialize(path: Rails.root.join("storage/tracking/brag_state.json"), page_id: nil, logger: Rails.logger)
         @path = path
+        @lock_path = "#{path}.lock"
         @page_id = page_id
         @logger = logger
+      end
+
+      # Serializa quem escreve no Brag. O daemon e um `rake tracking:rebuild`
+      # rodando ao mesmo tempo (ou dois ticks sobrepostos) reescreviam a mesma
+      # seção em paralelo — o resultado foram sentinels duplicados e ids no
+      # ledger sem assinatura. O lock é por arquivo (flock), vale entre
+      # processos; `with_lock` devolve nil se não conseguir em `timeout`.
+      def with_lock(timeout: 120)
+        FileUtils.mkdir_p(File.dirname(@lock_path))
+        File.open(@lock_path, File::RDWR | File::CREAT, 0o644) do |arquivo|
+          inicio = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          until arquivo.flock(File::LOCK_EX | File::LOCK_NB)
+            if Process.clock_gettime(Process::CLOCK_MONOTONIC) - inicio > timeout
+              @logger.warn("[tracking] Brag ocupado há mais de #{timeout}s — pulando este ciclo")
+              return nil
+            end
+            sleep 0.5
+          end
+          yield
+        end
       end
 
       # Estado do dia: { header_id:, sentinel_id:, blocks: [{ id:, signature: }] } ou nil.

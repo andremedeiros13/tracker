@@ -61,9 +61,23 @@ RSpec.describe Tracking::Renderers::BragBlocks do
       textos = bloco[:bulleted_list_item][:rich_text]
 
       expect(textos[0][:text][:content]).to eq("#2301 · ")
-      expect(textos[1]).to include(link: { url: "https://jira/browse/CHEKOUT-2301" })
+      # O link vai DENTRO de text — ao lado, a API do Notion responde 400.
+      expect(textos[1][:text]).to include(link: { url: "https://jira/browse/CHEKOUT-2301" })
+      expect(textos[1]).not_to have_key(:link)
       expect(textos[2][:annotations]).to eq(bold: true)
       expect(textos[2][:text][:content]).to eq(" — MERGEADO 16:48")
+    end
+
+    it "nunca põe link ao lado de text (validação da API do Notion)" do
+      blocos = renderer.items(report)
+
+      blocos.each do |bloco|
+        rich = bloco[:bulleted_list_item][:rich_text]
+        rich.each { |run| expect(run).not_to have_key(:link) }
+        Array(bloco[:bulleted_list_item][:children]).each do |filho|
+          filho[:bulleted_list_item][:rich_text].each { |run| expect(run).not_to have_key(:link) }
+        end
+      end
     end
 
     it "não mostra chave de dedup no texto (regressão do formato antigo)" do

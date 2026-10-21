@@ -36,18 +36,27 @@ module Tracking
       # `blocos` são os blocos do corpo já renderizados (sem header/sentinel).
       # Header e sentinel são criados uma vez e nunca apagados.
       def rebuild(day, header:, sentinel:, blocos:)
-        estado = @ledger.day(day)
-        assinaturas = blocos.map { |bloco| Renderers::BragBlocks.signature(bloco) }
-        return :sem_mudanca if inalterado?(estado, assinaturas)
+        # Lock entre processos: o daemon e um rake rodando junto (ou dois ticks
+        # sobrepostos) reescreviam a mesma seção em paralelo.
+        @ledger.with_lock do
+          estado = @ledger.day(day)
+          assinaturas = blocos.map { |bloco| Renderers::BragBlocks.signature(bloco) }
+          next :sem_mudanca if inalterado?(estado, assinaturas)
 
-        header_id = estado&.dig(:header_id) || achar_header(day) || criar(header)
-        sentinel_id = estado&.dig(:sentinel_id) || criar(sentinel, after: header_id)
+          header_id = estado&.dig(:header_id) || achar_header(day) || criar(header)
+          sentinel_id = estado&.dig(:sentinel_id) || achar_sentinel(header_id) || criar(sentinel, after: header_id)
 
-        apagar_do_dia(estado)
-        criados = escrever(blocos, after: sentinel_id)
-        @ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
-                            blocks: criados.each_with_index.map { |id, i| { id: id, signature: assinaturas[i] } })
-        :reescrito
+          # Sem ledger mas com sentinel, a seção é nossa: adota os blocos que
+          # já estão lá a partir do sentinel (é o que impede o rebuild de
+          # ACRESCENTAR uma cópia quando o ledger some/é apagado).
+          adotar_sem_ledger(day, estado, header_id, sentinel_id) if estado.nil?
+
+          apagar_do_dia(@ledger.day(day))
+          criados = escrever(blocos, after: sentinel_id)
+          @ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
+                              blocks: pares(criados, assinaturas))
+          :reescrito
+        end
       end
 
       # Blocks da seção de um dia (header + tudo até o próximo header). Usado
@@ -68,6 +77,49 @@ module Tracking
 
       private
 
+      # Seção nossa (tem sentinel) mas o ledger sumiu: os blocos abaixo do
+      # sentinel, até o próximo header, passam a ser propriedade nossa e serão
+      # reescritos. O que estiver abaixo do sentinel é, por contrato, gerado —
+      # quem escreve à mão escreve ANTES do sentinel ou num bloco próprio.
+      def adotar_sem_ledger(day, estado, header_id, sentinel_id)
+        return if estado
+
+        ids = blocos_abaixo_do_sentinel(day, sentinel_id)
+        return if ids.empty?
+
+        @logger.warn("[tracking] ledger ausente para #{day.iso8601}: adotando #{ids.size} block(s) da seção")
+        @ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
+                            blocks: ids.map { |id| { id: id } })
+      end
+
+      # Ids dos blocks gerados no dia: depois do sentinel, até o próximo header.
+      def blocos_abaixo_do_sentinel(day, sentinel_id)
+        marcador = Renderers::BragBlocks.data_do_dia(day)
+        dentro = false
+        viu_sentinel = false
+        ids = []
+        @client.block_children(@page_id).each do |block|
+          texto = texto_do(block)
+          if block.fetch("type") == "heading_2"
+            break if viu_sentinel
+            dentro = texto.start_with?(marcador)
+          elsif dentro && block.fetch("id") == sentinel_id
+            viu_sentinel = true
+          elsif viu_sentinel
+            ids << block.fetch("id")
+          end
+        end
+        ids
+      end
+
+      # Liga id criado → assinatura do bloco que o originou. `zip` (não
+      # each_with_index) para nunca gravar signature nil: se a API devolver
+      # mais ids que blocos enviados, zip trunca em vez de inventar pares.
+      def pares(criados, assinaturas)
+        criados.zip(assinaturas).reject { |id, assinatura| assinatura.nil? || id.nil? }
+               .map { |id, assinatura| { id: id, signature: assinatura } }
+      end
+
       def inalterado?(estado, assinaturas)
         return false if estado.nil?
 
@@ -85,6 +137,15 @@ module Tracking
 
       def criar(bloco, after: nil)
         @client.append_block_children(@page_id, [ bloco ], after:).fetch("results").first.fetch("id")
+      end
+
+      # Sentinels já criados por tentativas anteriores (o ledger pode não ter o
+      # id se uma escrita falhou no meio). Sem isso, cada ciclo falho deixava
+      # mais um parágrafo "gerado pelo Tracker" na página.
+      def achar_sentinel(header_id)
+        @client.block_children(@page_id)
+               .select { |b| b.fetch("type") == "paragraph" && texto_do(b).include?(Renderers::BragBlocks::SENTINEL) }
+               .first&.fetch("id")
       end
 
       # Apaga só o que está no ledger. `delete_block` trata 404 como sucesso
