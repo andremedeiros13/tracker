@@ -6,7 +6,13 @@ Rails.application.configure do
   # Log em STDOUT para o journald (o daemon roda como unit do systemd). O
   # default do Rails escreveria um arquivo sem rotação em :debug — em um
   # processo de longa duração isso vira disco cheio.
+  #
+  # `sync = true` é essencial aqui: sem ele, quando a saída não é um terminal
+  # (o caso do journald), o Ruby bufferiza e as linhas só aparecem quando o
+  # buffer enche ou o processo morre — o daemon parecia travado com o log mudo.
+  $stdout.sync = true
   config.logger = ActiveSupport::Logger.new($stdout)
+  config.autoflush_log = true
   config.log_level = ENV.fetch("TRACER_LOG_LEVEL", "info").to_sym
   config.log_tags = [ :pid ]
 
