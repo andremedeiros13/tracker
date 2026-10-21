@@ -1,88 +1,14 @@
 # frozen_string_literal: true
 
-# Scheduler do daemon (spec §3.1): thread dentro do `rails server` que dispara
-# `Todos::UseCases::NotifyPendingTodos` no intervalo configurado por ENV vars
-# (TRACER_NOTIFY_*), respeitando o período ativo. Thread daemon — morre com o
-# processo do servidor.
+# Boot do daemon: a lógica vive em lib/tracker/scheduler.rb (testável sem
+# Rails). Aqui só o hook que liga a thread depois da aplicação subir.
 #
-# Desabilitável em testes/console: Tracker::Scheduler.disabled = true
-module Tracker
-  class Scheduler
-    class << self
-      attr_accessor :disabled
-    end
-    self.disabled = false
-
-    INTERVALO_MINIMO_SEGUNDOS = 60
-
-    def start
-      Thread.new do
-        Thread.current.name = "tracker-scheduler"
-        loop do
-          disparar_se_no_periodo
-          sleep intervalo_segundos
-        rescue StandardError => e
-          Rails.logger.error("[tracker-scheduler] #{e.class}: #{e.message}")
-          sleep intervalo_segundos
-        end
-      end
-    end
-
-    private
-
-    def intervalo_segundos
-      [ ENV.fetch("TRACER_NOTIFY_INTERVAL_MINUTES", "45").to_i * 60, INTERVALO_MINIMO_SEGUNDOS ].max
-    end
-
-    # As três etapas são independentes: cada uma resgata o próprio erro, senão
-    # uma falha (ex.: Notion fora) pula as seguintes — e o 1-on-1 nunca roda.
-    def disparar_se_no_periodo
-      return unless periodo_ativo?
-
-      notificar_pendencias
-      coletar_entregas
-      importar_transcricoes
-    end
-
-    # Notificação nativa com o resumo das pendências. Resgatada.
-    def notificar_pendencias
-      Todos::UseCases::NotifyPendingTodos.new.call
-    rescue StandardError => e
-      Rails.logger.error("[tracker-scheduler] notify: #{e.class}: #{e.message}")
-    end
-
-    # Ciclo do Tracking: coleta as entregas do dia e appenda no Brag document
-    # (dedup incremental). Resgatado — nunca derruba o ciclo de notificação.
-    def coletar_entregas
-      Tracking::UseCases::CollectTodaysDeliveries.new.call
-    rescue StandardError => e
-      Rails.logger.error("[tracker-scheduler] tracking: #{e.class}: #{e.message}")
-    end
-
-    # Ciclo do OneOnOnes: importa os .md soltos na pasta monitorada, appenda
-    # o resumo na page 1-on-1 e cria To-Dos dos action items meus. Resgatado.
-    def importar_transcricoes
-      OneOnOnes::UseCases::ImportTranscription.new.call
-    rescue StandardError => e
-      Rails.logger.error("[tracker-scheduler] one-on-ones: #{e.class}: #{e.message}")
-    end
-
-    def periodo_ativo?
-      agora = Time.current
-      inicio = parse_hora(ENV.fetch("TRACER_NOTIFY_ACTIVE_START", "09:00"))
-      fim = parse_hora(ENV.fetch("TRACER_NOTIFY_ACTIVE_END", "18:00"))
-      agora.between?(agora.change(hour: inicio.first, min: inicio.last),
-                     agora.change(hour: fim.first, min: fim.last))
-    end
-
-    def parse_hora(hora)
-      hora.split(":").map(&:to_i)
-    end
-  end
-end
-
+# Desligado em testes, no console, e quando TRACER_DISABLE_SCHEDULER=1 (usado
+# pelo `rails runner` avulso para não disparar um ciclo junto).
 Rails.application.config.after_initialize do
-  next if defined?(Rails::Console) || Rails.env.test? || Tracker::Scheduler.disabled
+  next if defined?(Rails::Console) || Rails.env.test?
+  next if ENV["TRACER_DISABLE_SCHEDULER"] == "1"
+  next if Tracker::Scheduler.disabled?
 
-  Tracker::Scheduler.new.start
+  Tracker::Scheduler.from_env.start
 end

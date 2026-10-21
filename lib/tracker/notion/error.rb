@@ -2,8 +2,8 @@
 
 module Tracker
   module Notion
-    # Erro de domínio do Notion — base própria (o Notion client veio antes de
-    # Tracker::Error; o ciclo do scheduler resgata ambos via Tracker::Error).
-    class Error < StandardError; end
+    # Erro de domínio do Notion. Deriva de Tracker::Error como os dos outros
+    # clientes — assim quem resgata Tracker::Error cobre as três integrações.
+    class Error < ::Tracker::Error; end
   end
 end

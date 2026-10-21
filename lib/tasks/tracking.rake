@@ -1,14 +1,23 @@
 # frozen_string_literal: true
 
 namespace :tracking do
-  desc "Coleta as entregas de hoje e appenda no Brag document (dedup incremental)"
-  task report: :environment do
-    novas = Tracking::UseCases::CollectTodaysDeliveries.new.call
-    if novas.nil? || novas.zero?
-      puts "Nada novo — Brag document em dia."
-    else
-      puts "#{novas} entrega#{novas > 1 ? "s" : ""} appendada#{novas > 1 ? "s" : ""} no Brag document."
-    end
+  desc "Coleta o dia e reconstrói a seção no Brag document (idempotente)"
+  task :rebuild, [ :date ] => :environment do |_, args|
+    dia = args[:date] ? Date.parse(args[:date]) : Date.current
+    mudou = Tracking::UseCases::RebuildDayReport.new.call(dia)
+    puts mudou.positive? ? "Brag atualizado (#{mudou} dia(s))." : "Nada mudou — Brag em dia."
+  end
+
+  desc "Imprime o dia como vai ficar no Brag, SEM escrever no Notion"
+  task :preview, [ :date ] => :environment do |_, args|
+    dia = args[:date] ? Date.parse(args[:date]) : Date.current
+    Tracking::UseCases::RebuildDayReport.new(dry_run: true).call(dia)
+  end
+
+  desc "Adota a seção antiga do dia (backup em storage/ + sentinel + ledger)"
+  task :adopt, [ :date ] => :environment do |_, args|
+    dia = args[:date] ? Date.parse(args[:date]) : Date.current
+    Tracking::UseCases::AdoptBragSection.new.call(dia)
   end
 
   desc "Descobre o customfield 'Reviewer' no Jira (copie o id pro .env)"

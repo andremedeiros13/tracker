@@ -28,8 +28,11 @@
 threads_count = ENV.fetch("RAILS_MAX_THREADS", 3)
 threads threads_count, threads_count
 
-# Specifies the `port` that Puma will listen on to receive requests; default is 3000.
-port ENV.fetch("PORT", 3000)
+# Specifies the `port` that Puma will listen on to receive requests.
+# Porta própria do Tracker (3931) — a 3000 é de outras aplicações na máquina
+# do usuário e o `rails server` batia de frente. O daemon normal (bin/tracker)
+# não abre porta nenhuma; isto vale só para `bin/start`/`rails server`.
+port ENV.fetch("PORT", 3931)
 
 # Allow puma to be restarted by `bin/rails restart` command.
 plugin :tmp_restart

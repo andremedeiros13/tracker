@@ -1,0 +1,25 @@
+#!/usr/bin/env sh
+# Daemon do Tracker: Rails em production, sem servidor HTTP.
+#
+# O `rails server` existia só para manter o processo vivo e responder /up — o
+# /up não prova nada sobre o ciclo, e em development o app carrega o reloader e
+# o file-watcher sem necessidade. Aqui o scheduler sobe pelo after_initialize
+# (config/initializers/scheduler.rb) e a thread principal segura o processo.
+# Liveness = uma linha de log por tick no journal.
+#
+# systemd user unit roda com PATH mínimo — sem o ruby do asdf, o bundler do
+# sistema não encontra as gems do projeto. Aponta direto pro install do asdf
+# (lê .tool-versions; os shims precisariam do asdf no PATH).
+if [ -d "$HOME/.asdf/installs/ruby" ]; then
+  RUBY_INSTALL="$HOME/.asdf/installs/ruby/$(cat "$HOME/.tool-versions" 2>/dev/null | awk '$1=="ruby" {print $2}')"
+  if [ -x "$RUBY_INSTALL/bin/ruby" ]; then
+    PATH="$RUBY_INSTALL/bin:$PATH"
+  fi
+fi
+
+set -a
+[ -f .env ] && . ./.env
+set +a
+
+export RAILS_ENV="${RAILS_ENV:-production}"
+exec ./bin/rails runner "sleep"

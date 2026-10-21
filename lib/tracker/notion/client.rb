@@ -51,8 +51,26 @@ module Tracker
       # PATCH e não POST: no workspace do usuário, o POST nesse path responde
       # 400 invalid_request_url em toda page (anomalia da API, testada em
       # 2026-10-15 com curl e Net::HTTP); o PATCH no mesmo path appenda.
-      def append_block_children(page_id, children)
-        request(:Patch, "/blocks/#{page_id}/children", body: { children: })
+      #
+      # `after:` insere logo depois do block indicado (validado em 2026-10-21
+      # contra a API, versão 2022-06-28 — nessa versão o parâmetro se chama
+      # "after", não "position"). Sem ele, appenda no fim da page.
+      def append_block_children(page_id, children, after: nil)
+        body = { children: }
+        body[:after] = after if after
+        request(:Patch, "/blocks/#{page_id}/children", body:)
+      end
+
+      # Move um block para a lixeira (DELETE /blocks/{id}). Os filhos vão
+      # junto (verificado em 2026-10-21 numa page de rascunho: depois do
+      # DELETE do pai, /blocks/{pai}/children responde 404).
+      # Idempotente para quem chama: 404 (já não existe) conta como sucesso.
+      def delete_block(block_id)
+        request(:Delete, "/blocks/#{block_id}")
+      rescue ApiError => e
+        raise unless e.message.include?("404")
+
+        { "object" => "block", "id" => block_id, "in_trash" => true }
       end
 
       # Paginação por cursor (has_more/start_cursor, 100/página — API Free).

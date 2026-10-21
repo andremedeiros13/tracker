@@ -5,13 +5,20 @@ After=graphical-session.target
 [Service]
 Type=simple
 WorkingDirectory=%h/Repositories/tracker
-ExecStart=%h/Repositories/tracker/bin/start
+ExecStart=%h/Repositories/tracker/bin/tracker
+# production: sem reloader/file-watcher, eager load (o daemon não edita código
+# em runtime). bin/tracker exporta RAILS_ENV=production por conta própria.
+Environment=RAILS_ENV=production
 Restart=on-failure
 RestartSec=5s
 SyslogIdentifier=tracker
+# Log vai para o journal (production.rb: logger em STDOUT, level info).
+StandardOutput=journal
+StandardError=journal
 # Teto de memória: o pico já chegou a 22,7G (OOM killer do kernel, 2026-10-20).
 # Com o limite, estourar mata só o daemon — o systemd reinicia — em vez de
-# arriscar a sessão inteira.
+# arriscar a sessão inteira. O ciclo normal usa ~100 MB; a varredura larga
+# diária do Jira chega a ~600 MB.
 MemoryMax=2G
 
 [Install]

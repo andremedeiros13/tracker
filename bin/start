@@ -1,10 +1,15 @@
 #!/usr/bin/env sh
-# Inicia o Tracker (spec §4 + ADR 0001): o `rails server` serve só o health
-# check (/up) e roda o scheduler de notificações nativas (thread em
-# config/initializers/scheduler.rb). A UI é o Notion.
+# Inicia o Tracker com o `rails server` — mantido só para debug: serve o health
+# check (/up) numa aba do navegador e roda o scheduler no mesmo processo.
+#
+# Para o dia a dia use ./bin/tracker (sem servidor HTTP, em production).
+#
+# Porta própria (3931): a 3000 é de outras aplicações na máquina. Sobrescreva
+# com PORT=xxxx.
+#
 # systemd user unit roda com PATH mínimo — sem o ruby do asdf, o bundler do
-# sistema (ruby 3.3) não encontra as gems do projeto. Aponta direto pro
-# install do asdf (lê .tool-versions; os shims precisariam do asdf no PATH).
+# sistema não encontra as gems do projeto. Aponta direto pro install do asdf
+# (lê .tool-versions; os shims precisariam do asdf no PATH).
 if [ -d "$HOME/.asdf/installs/ruby" ]; then
   RUBY_INSTALL="$HOME/.asdf/installs/ruby/$(cat "$HOME/.tool-versions" 2>/dev/null | awk '$1=="ruby" {print $2}')"
   if [ -x "$RUBY_INSTALL/bin/ruby" ]; then
@@ -15,4 +20,6 @@ fi
 set -a
 [ -f .env ] && . ./.env
 set +a
-exec ./bin/rails server "$@"
+
+export PORT="${PORT:-3931}"
+exec ./bin/rails server -p "$PORT" "$@"

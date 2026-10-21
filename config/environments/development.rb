@@ -3,6 +3,12 @@ require "active_support/core_ext/integer/time"
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
 
+  # Rotação do log de desenvolvimento: o default do Rails 8.1 já rotaciona em
+  # 100 MB, mas um arquivo de 100 MB rotacionado ainda ocupa disco à toa num
+  # projeto que só roda rake/console. 5 × 20 MB é suficiente para depurar.
+  config.logger = ActiveSupport::Logger.new(Rails.root.join("log/development.log"), 5, 20 * 1024 * 1024)
+  config.logger.formatter = ActiveSupport::Logger::SimpleFormatter.new
+
   # Make code changes take effect immediately without server restart.
   config.enable_reloading = true
 

@@ -45,7 +45,7 @@ cp .env.example .env
 $EDITOR .env
 
 bin/setup   # instala gems, valida o schema e dispara uma notificação de teste
-bin/start   # sobe o daemon
+bin/tracker   # sobe o daemon
 ```
 
 > Os IDs das pages/database você pega no Notion: abra o item → **••• → Copy link**
@@ -64,8 +64,13 @@ agrupado por `Status`) e edite direto nele:
 - **Snoozar** → arraste para `Em andamento` + preencha `Snoozed até` com horário
   no futuro (silencia o lembrete até o horário vencer)
 
-O daemon roda em segundo plano (health check em http://localhost:3000/up). O ciclo
-dispara a cada 45 min, das 09:00 às 18:00 (configurável com `TRACER_NOTIFY_*`).
+O daemon roda em segundo plano, **sem abrir porta** (não sobe servidor HTTP). Cada
+job tem a própria cadência: notificação a cada 45 min (09:00–18:00), Tracking a
+cada 30 min (08:00–23:50) e uma varredura larga do Jira por dia. Tudo configurável
+com `TRACER_*`.
+
+> Se precisar do servidor para debug, use `bin/start` — ele escuta em
+> **http://localhost:3931/up** (porta própria; a 3000 é de outras aplicações).
 
 ### 1-on-1: solte o .md do Meet na pasta `one_on_ones/`
 
@@ -77,40 +82,57 @@ Solte nela o .md do Meet ("Anotações do Gemini") — o daemon importa sozinho 
   rows no To-Dos com origem `Via Transcrição`
 - O arquivo importado vai para `one_on_ones/importados/` — nunca re-importado
 
-### Tracking: entregas do dia no Brag document
+### Tracking: o dia no Brag document
 
-A cada ciclo, o daemon coleta suas entregas do dia e appenda no Brag document
-(só o que ainda não está — dedup incremental):
+A cada ciclo o daemon **reconstrói** o dia no Brag document (não appenda: um PR
+aberto às 11h e mergeado às 18h precisa aparecer como mergeado). Um item por
+card, com estado, métricas do PR e o "Antes/Fiz" tirado do corpo do PR:
 
-- **Jira**: cards que você moveu no dia + campo Reviewer
-- **GitHub**: PRs que você abriu, PRs que você revisou, seus commits na org
+```
+## 21/10/2026 — quarta · [Motor][Wave2] Pagamento com até 3 cartões
+• #2301 · [Payments] T11 POST /payments/{id}/capture — MERGEADO 16:48
+    PR #1216 · 14 commits · 17 arquivos · +1257/−55 · mergeado 16:48
+    aprovado por marivaldo
+    Antes: a rota respondia 204 e não gravava nada…
+    Fiz: grava a solicitação e chama o provedor no próprio HTTP…
+• #2332 · [RDMerchant] T20 captured_at da Bill — card de Itallo
+    Review → Ready for Deploy
+```
 
-Cada bullet tem link clicável para o card/PR/commit de origem; o impacto você
-narra à mão.
+- **Jira**: cards em que você participou (filtro estreito, ~0,5 s por ciclo)
+- **GitHub**: seus PRs (abertos e mergeados no dia), reviews que você deu, commits
+- Um card de outra pessoa que você só moveu aparece como `card de Fulano` — nunca
+  como sua entrega; higiene de board (`Prioritized → To Do`) não aparece
+
+O trecho gerado fica sob um aviso cinza ("gerado pelo Tracker — edições neste
+trecho são sobrescritas"). Blocos que **você** criar na seção não são tocados.
 
 ## Comandos
 
 ```bash
-bin/start                          # sobe o daemon
-rake tracking:report               # coleta as entregas agora (útil p/ testar)
+bin/tracker                        # sobe o daemon (sem servidor HTTP, production)
+bin/start                          # sobe com servidor HTTP em :3931 (debug)
+rake tracking:preview[21/10/2026]  # imprime o dia SEM escrever no Notion
+rake tracking:rebuild[21/10/2026]  # reconstrói a seção do dia agora
+rake tracking:adopt[21/10/2026]    # migra uma seção no formato antigo (uma vez)
 rake tracking:discover_reviewer    # acha o id do customfield Reviewer no Jira
-rake one_on_ones:import            # importa as transcrições agora (útil p/ testar)
+rake one_on_ones:import            # importa as transcrições agora
 ```
 
 > O `rake` não carrega o `.env` — rode antes: `set -a; source .env; set +a`
 
 ## Quando algo não entra no Notion
 
-O daemon é silencioso no sucesso; falha aparece no log, com o nome da etapa:
+O daemon é silencioso no sucesso; falha aparece no log, com o nome do job:
 
 ```bash
-tail -f log/development.log              # ciclos: notify: / tracking: / one-on-ones:
-journalctl --user -u tracker.service -f  # boot, crash, OOM e reinício
+journalctl --user -u tracker.service -f  # ticks, falhas, boot, OOM e reinício
+tail -f log/development.log              # quando você roda via rake/console
 ```
 
-Cada etapa do ciclo resgata o próprio erro: uma falha no Tracking não impede a
-importação de 1-on-1. O `/up` respondendo 200 só prova que o servidor subiu, não
-que o ciclo rodou — para isso, olhe o log.
+Cada job resgata o próprio erro: uma falha no Tracking não impede a notificação
+nem a importação de 1-on-1. Um `tick` no journal diz quais jobs rodaram; ausência
+de tick há mais de uma hora significa daemon parado.
 
 Se o processo morrer sem traceback (`Killed`), foi o teto de memória do unit
 (`MemoryMax=2G`) e o systemd reinicia em 5s — o reinício também pega código
@@ -136,9 +158,9 @@ sudo loginctl enable-linger $USER
 
 Logs: `journalctl --user -u tracker.service -f`
 
-O unit roda com PATH mínimo, então o `bin/start` resolve o Ruby sozinho: se houver
+O unit roda com PATH mínimo, então o `bin/tracker` resolve o Ruby sozinho: se houver
 asdf (`~/.asdf`), ele lê o `.tool-versions` e usa o Ruby de lá. Com outro version
-manager (rbenv, mise…), ajuste o PATH no `bin/start` ou exporte no unit.
+manager (rbenv, mise…), ajuste o PATH no `bin/tracker` ou exporte no unit.
 
 </details>
 
@@ -157,7 +179,7 @@ Crie `~/Library/LaunchAgents/com.tracker.plist`:
   <array>
     <string>/bin/zsh</string>
     <string>-c</string>
-    <string>cd ~/Repositories/tracker &amp;&amp; ./bin/start</string>
+    <string>cd ~/Repositories/tracker &amp;&amp; ./bin/tracker</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -178,7 +200,7 @@ No PowerShell (como seu usuário):
 
 ```powershell
 $action = New-ScheduledTaskAction -Execute "powershell" `
-  -Argument "-NoProfile -Command cd $HOME\Repositories\tracker; ./bin/start"
+  -Argument "-NoProfile -Command cd $HOME\Repositories\tracker; ./bin/tracker"
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 Register-ScheduledTask -TaskName "Tracker" -Action $action -Trigger $trigger
 ```

@@ -3,6 +3,13 @@ require "active_support/core_ext/integer/time"
 Rails.application.configure do
   # Settings specified here will take precedence over those in config/application.rb.
 
+  # Log em STDOUT para o journald (o daemon roda como unit do systemd). O
+  # default do Rails escreveria um arquivo sem rotação em :debug — em um
+  # processo de longa duração isso vira disco cheio.
+  config.logger = ActiveSupport::Logger.new($stdout)
+  config.log_level = ENV.fetch("TRACER_LOG_LEVEL", "info").to_sym
+  config.log_tags = [ :pid ]
+
   # Code is not reloaded between requests.
   config.enable_reloading = false
 

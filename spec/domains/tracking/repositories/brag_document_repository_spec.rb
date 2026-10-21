@@ -1,161 +1,127 @@
 # frozen_string_literal: true
 
 require "rails_helper"
+require "tmpdir"
 
 RSpec.describe Tracking::Repositories::BragDocumentRepository do
   let(:client) { instance_double(Tracker::Notion::Client) }
-  let(:repository) { described_class.new(client: client, page_id: "page-brag") }
-  let(:dia) { Date.new(2026, 10, 14) }
+  let(:dir) { Dir.mktmpdir }
+  let(:ledger) { Tracker::Tracking::BlockLedger.new(path: File.join(dir, "state.json"), page_id: "page-brag",
+                                                    logger: instance_double(ActiveSupport::Logger, warn: nil, error: nil)) }
+  let(:repository) { described_class.new(client: client, page_id: "page-brag", ledger: ledger,
+                                         logger: instance_double(ActiveSupport::Logger, warn: nil, error: nil)) }
+  let(:dia) { Date.new(2026, 10, 21) }
+  let(:header) { { object: "block", type: "heading_2", heading_2: { rich_text: [ { type: "text", text: { content: "21/10/2026 — quarta" } } ] } } }
+  let(:sentinel) { { object: "block", type: "paragraph", paragraph: { rich_text: [ { type: "text", text: { content: "gerado pelo Tracker" } } ] } } }
 
-  def header(content)
-    { "id" => "h-#{content}", "type" => "heading_2",
-      "heading_2" => { "rich_text" => [ { "plain_text" => content } ] } }
+  after { FileUtils.remove_entry(dir) }
+
+  def bloco(texto)
+    { object: "block", type: "bulleted_list_item",
+      bulleted_list_item: { rich_text: [ { type: "text", text: { content: texto } } ] } }
   end
 
-  def bullet(content)
-    { "id" => "b-#{content.object_id}", "type" => "bulleted_list_item",
-      "bulleted_list_item" => { "rich_text" => [ { "plain_text" => content } ] } }
+  def blocos(*textos) = textos.map { |t| bloco(t) }
+
+  # Stub do client que simula ids novos a cada append e respeita a posição.
+  def stub_client(existentes: [])
+    sequencia = 0
+    allow(client).to receive(:block_children).and_return(existentes)
+    allow(client).to receive(:append_block_children) do |_page, children, after: nil|
+      registros = children.map do
+        sequencia += 1
+        { "id" => "novo-#{sequencia}" }
+      end
+      { "results" => registros }
+    end
+    allow(client).to receive(:delete_block) { { "object" => "block" } }
   end
 
-  def entrega_jira(external_id, title = "ENG-1: Resumo", detail: nil, context: [])
-    Tracking::Entities::Delivery.new(
-      source: :jira, kind: :card_movido, title: title, detail: detail, context: context,
-      url: "https://jira.example.com/browse/ENG-1", occurred_at: Time.current, external_id: external_id
-    )
-  end
+  describe "#rebuild" do
+    it "cria header e sentinel na primeira vez e grava o body" do
+      stub_client
 
-  describe "#entregas_existentes" do
-    it "retorna os external_ids dos bullets do dia (dedup)" do
-      allow(client).to receive(:block_children).and_return([
-        header("14/10/2026"),
-        bullet("[Jira] Movido [ENG-1:10001:status] Resumo"),
-        bullet("[GitHub] Commit [abc123] fix")
-      ])
+      resultado = repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos("a", "b"))
 
-      existentes = repository.entregas_existentes(dia)
-
-      expect(existentes.map { |e| e[:external_id] }).to eq([ "ENG-1:10001:status", "abc123" ])
+      expect(resultado).to eq(:reescrito)
+      expect(client).to have_received(:append_block_children).with("page-brag", [ header ], after: nil)
+      expect(client).to have_received(:append_block_children).with("page-brag", [ sentinel ], after: "novo-1")
+      expect(client).to have_received(:append_block_children).with("page-brag", anything, after: "novo-2")
     end
 
-    it "ignora bullets de outros dias (outro header fecha a janela)" do
-      allow(client).to receive(:block_children).and_return([
-        header("13/10/2026"),
-        bullet("[Jira] Movido [ENG-0:9999:status] Antigo"),
-        header("14/10/2026"),
-        bullet("[Jira] Movido [ENG-1:10001:status] Hoje")
-      ])
+    it "não escreve nada quando o conteúdo é idêntico (idempotência)" do
+      stub_client
+      repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos("a", "b"))
+      RSpec::Mocks.space.proxy_for(client).reset
 
-      existentes = repository.entregas_existentes(dia)
+      allow(client).to receive(:append_block_children)
+      allow(client).to receive(:delete_block)
 
-      expect(existentes.map { |e| e[:external_id] }).to eq([ "ENG-1:10001:status" ])
-    end
+      resultado = repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos("a", "b"))
 
-    it "retorna vazio quando o dia não tem header" do
-      allow(client).to receive(:block_children).and_return([
-        header("13/10/2026"),
-        bullet("[Jira] Movido [ENG-0:9999:status] Antigo")
-      ])
-
-      expect(repository.entregas_existentes(dia)).to be_empty
-    end
-  end
-
-  describe "#append" do
-    before do
-      allow(client).to receive(:block_children).and_return([])
-      allow(client).to receive(:append_block_children).and_return({ "results" => [] })
-    end
-
-    it "appenda header do dia + bullets com link clicável" do
-      repository.append(dia, [ entrega_jira("ENG-1:10001:status") ])
-
-      expect(client).to have_received(:append_block_children).with("page-brag", [
-        hash_including(type: "heading_2"),
-        hash_including(
-          type: "bulleted_list_item",
-          bulleted_list_item: hash_including(
-            rich_text: [
-              hash_including(text: hash_including(content: a_string_including("[ENG-1:10001:status]"))),
-              hash_including(text: hash_including(link: { url: "https://jira.example.com/browse/ENG-1" }))
-            ]
-          )
-        )
-      ])
-    end
-
-    it "não appenda header quando o dia já tem header" do
-      allow(client).to receive(:block_children).and_return([ header("14/10/2026") ])
-      repository.append(dia, [ entrega_jira("ENG-2:10002:status") ])
-
-      expect(client).to have_received(:append_block_children).with("page-brag", [ hash_including(type: "bulleted_list_item") ])
-    end
-
-    it "não chama a API quando não há entregas" do
-      repository.append(dia, [])
-
+      expect(resultado).to eq(:sem_mudanca)
       expect(client).not_to have_received(:append_block_children)
+      expect(client).not_to have_received(:delete_block)
     end
 
-    it "põe o detail em negrito, antes do título" do
-      repository.append(dia, [ entrega_jira("ENG-1:10001:status", "ENG-1 — Resumo", detail: "In Progress → Review") ])
+    it "apaga só os blocos do ledger e reescreve quando mudou" do
+      stub_client
+      repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos("a", "b"))
+      allow(client).to receive(:delete_block)
 
-      blocos = blocos_enviados { repository.append(dia, [ entrega_jira("ENG-1:10001:status", "ENG-1 — Resumo", detail: "In Progress → Review") ]) }
-      textos = blocos[1][:bulleted_list_item][:rich_text]
-      expect(textos[1][:text][:content]).to eq("In Progress → Review ")
-      expect(textos[1][:annotations]).to eq(bold: true)
-      expect(textos[2][:text][:content]).to eq("ENG-1 — Resumo")
+      repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos("a", "c"))
+
+      expect(client).to have_received(:delete_block).with("novo-3")
+      expect(client).to have_received(:delete_block).with("novo-4")
     end
 
-    it "põe o contexto como sub-bullets aninhados no bullet" do
-      contexto = [ "História · [Motor][Wave2] Pagamento", "Quem criou a venda pode cobrá-la depois." ]
-      blocos = blocos_enviados do
-        repository.append(dia, [ entrega_jira("ENG-1:10001:status", "ENG-1 — Resumo", context: contexto) ])
+    it "NUNCA apaga bloco desconhecido (escrito à mão na seção)" do
+      manual = { "id" => "manual-1", "type" => "paragraph",
+                 "paragraph" => { "rich_text" => [ { "plain_text" => "minha nota" } ] } }
+      allow(client).to receive(:block_children).and_return([ manual ])
+      allow(client).to receive(:append_block_children) { |_, children, after: nil| { "results" => children.map { |_| { "id" => "novo-1" } } } }
+      allow(client).to receive(:delete_block)
+
+      repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos("a"))
+
+      expect(client).not_to have_received(:delete_block).with("manual-1")
+    end
+
+    it "reaproveita o header existente no documento quando o ledger sumiu" do
+      existente = { "id" => "h-existente", "type" => "heading_2",
+                    "heading_2" => { "rich_text" => [ { "plain_text" => "21/10/2026 — quarta" } ] } }
+      stub_client(existentes: [ existente ])
+
+      repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos("a"))
+
+      expect(client).to have_received(:append_block_children).with("page-brag", [ sentinel ], after: "h-existente")
+      expect(client).not_to have_received(:append_block_children).with("page-brag", [ header ], after: nil)
+    end
+
+    it "envia em lotes de 100 e encadeia a posição entre lotes (não inverte a ordem)" do
+      stub_client
+      posicoes = []
+      allow(client).to receive(:append_block_children) do |_page, children, after: nil|
+        posicoes << [ children.size, after ]
+        { "results" => children.map { |_| { "id" => "x#{posicoes.size}-#{children.size}" } } }
       end
 
-      filhos = blocos[1][:bulleted_list_item][:children]
-      expect(filhos.map { |f| f[:bulleted_list_item][:rich_text][0][:text][:content] }).to eq(contexto)
+      repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos(*Array.new(150) { |i| "item #{i}" }))
+
+      lotes = posicoes.last(2)
+      expect(lotes.map(&:first)).to eq([ 100, 50 ])
+      # O `after` do 2º lote é o ÚLTIMO id do 1º lote (x3-100), não o sentinel:
+      # ancorar no mesmo ponto inverteria a ordem do dia.
+      expect(lotes.last.last).to eq("x3-100")
     end
 
-    it "não cria children quando não há contexto" do
-      blocos = blocos_enviados { repository.append(dia, [ entrega_jira("ENG-1:10001:status") ]) }
+    it "dia vazio ainda grava sentinel e limpa o body" do
+      stub_client
+      repository.rebuild(dia, header: header, sentinel: sentinel, blocos: blocos("a"))
+      allow(client).to receive(:delete_block)
 
-      expect(blocos[1][:bulleted_list_item][:children]).to eq([])
+      expect(repository.rebuild(dia, header: header, sentinel: sentinel, blocos: [])).to eq(:reescrito)
+      expect(client).to have_received(:delete_block)
     end
-
-    it "envia em lotes de 100 blocks (teto da API do Notion)" do
-      # Os sub-bullets vão aninhados DENTRO do bullet, então cada entrega é
-      # 1 block de topo: 150 entregas + header = 151 → lotes de 100 e 51.
-      entregas = Array.new(150) { |i| entrega_jira("ENG-#{i}:1:status", "ENG-#{i} — Resumo", context: [ "linha 1", "linha 2" ]) }
-
-      lotes = lotes_enviados { repository.append(dia, entregas) }
-
-      expect(lotes).to eq([ 100, 51 ])
-    end
-
-    it "não estoura o teto quando o dia inteiro passa de 100 entregas" do
-      entregas = Array.new(101) { |i| entrega_jira("ENG-#{i}:1:status") }
-
-      lotes = lotes_enviados { repository.append(dia, entregas) }
-
-      expect(lotes).to all(be <= 100)
-      expect(lotes.sum).to eq(102) # 101 entregas + header
-    end
-  end
-
-  # Tamanhos dos lotes enviados durante o exemplo.
-  def lotes_enviados
-    tamanhos = []
-    allow(client).to receive(:append_block_children) { |_, children| tamanhos << children.size }
-    yield
-    tamanhos
-  end
-
-  # Captura os blocos enviados durante o exemplo (achatando os lotes). O
-  # índice 0 é o header do dia, que vai junto no primeiro append.
-  def blocos_enviados
-    enviados = []
-    allow(client).to receive(:append_block_children) { |_, children| enviados.concat(children) }
-    yield
-    enviados
   end
 end

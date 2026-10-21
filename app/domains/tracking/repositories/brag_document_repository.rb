@@ -2,141 +2,118 @@
 
 module Tracking
   module Repositories
-    # Adapter Notion do Brag document (page, não database — ADR 0001): lê os
-    # blocks existentes (fonte do dedup) e appenda header do dia + bullets
-    # com link clicável (decisão #12).
+    # Adapter Notion do Brag document (page, não database — ADR 0001).
+    #
+    # O documento é RECONSTRUÍDO, não appendado: o valor do dia só se conhece
+    # quando o dia acaba (o PR das 11h pode mergear às 18h), então append
+    # incremental congela o registro no primeiro ciclo e mostra "PR aberto"
+    # para sempre. A cada mudança, a seção do dia é reescrita inteira.
+    #
+    # Quem manda apagar é o ledger (lib/tracker/tracking/block_ledger.rb):
+    # só os ids que nós criamos. Um bloco escrito à mão na seção não está no
+    # ledger e nunca é tocado. Sem ledger confiável, cai no fallback por
+    # convenção — que só assume posse quando o sentinel está lá.
     class BragDocumentRepository
       # Teto de children por chamada da API do Notion.
       LOTE_DE_BLOCKS = 100
 
       def initialize(client: Tracker::Notion::Client.from_env,
-                     page_id: ENV.fetch("TRACER_NOTION_BRAG_PAGE_ID"))
+                     page_id: ENV.fetch("TRACER_NOTION_BRAG_PAGE_ID"),
+                     ledger: nil,
+                     logger: Rails.logger)
         @client = client
         @page_id = page_id
+        @ledger = ledger || Tracker::Tracking::BlockLedger.new(page_id: page_id)
+        @logger = logger
       end
 
-      # Entregas já registradas no dia — dedup por external_id embutido no
-      # bullet ("[Jira] Movido [ENG-123:10001:status] Descrição" — o id é o
-      # último segmento [..] antes da descrição; contrato do formato).
-      def entregas_existentes(day)
-        bullets_do_dia(marcador_do_dia(day)).filter_map do |block|
-          texto = texto_do(block)
-          next unless (id = external_id_do(texto))
+      # Reescreve a seção do dia.
+      #
+      # Devolve :sem_mudanca quando a assinatura de todos os itens bate com o
+      # ledger — nesse caso NENHUM request de escrita acontece (é o que faz um
+      # ciclo de 30 min sem novidade custar quase nada).
+      #
+      # `blocos` são os blocos do corpo já renderizados (sem header/sentinel).
+      # Header e sentinel são criados uma vez e nunca apagados.
+      def rebuild(day, header:, sentinel:, blocos:)
+        estado = @ledger.day(day)
+        assinaturas = blocos.map { |bloco| Renderers::BragBlocks.signature(bloco) }
+        return :sem_mudanca if inalterado?(estado, assinaturas)
 
-          { external_id: id, texto: texto }
-        end
+        header_id = estado&.dig(:header_id) || achar_header(day) || criar(header)
+        sentinel_id = estado&.dig(:sentinel_id) || criar(sentinel, after: header_id)
+
+        apagar_do_dia(estado)
+        criados = escrever(blocos, after: sentinel_id)
+        @ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
+                            blocks: criados.each_with_index.map { |id, i| { id: id, signature: assinaturas[i] } })
+        :reescrito
       end
 
-      # Appenda o header do dia (se ainda não existe) e os bullets novos.
-      def append(day, entregas)
-        return if entregas.empty?
-
-        # Cada entrega rende 1 bullet + até 3 sub-bullets; a API do Notion
-        # aceita no máximo 100 children por chamada, então vai em lotes. O
-        # header sempre cabe no primeiro lote (cada lote tem ao menos 1 item,
-        # e o primeiro é o header quando falta).
-        children = []
-        children << header_do_dia(day) unless header_existe?(day)
-        children.concat(entregas.flat_map { |entrega| blocos_da(entrega) })
-
-        children.each_slice(LOTE_DE_BLOCKS) do |lote|
-          @client.append_block_children(@page_id, lote)
+      # Blocks da seção de um dia (header + tudo até o próximo header). Usado
+      # pela migração única (AdoptBragSection) — o rebuild normal não varre a
+      # página quando o ledger está em dia.
+      def blocos_do_dia(day)
+        marcador = Renderers::BragBlocks.data_do_dia(day)
+        dentro = false
+        @client.block_children(@page_id).select do |block|
+          if block.fetch("type") == "heading_2"
+            dentro = texto_do(block).start_with?(marcador)
+            dentro
+          else
+            dentro
+          end
         end
       end
 
       private
 
-      # Bullets do dia alvo: os que vêm depois do header marcado com o dia,
-      # até o próximo header. Header sem o marcador fecha a janela.
-      def bullets_do_dia(marcador)
-        dentro = false
-        @client.block_children(@page_id).filter_map do |block|
-          tipo = block.fetch("type")
-          next unless tipo == "heading_2" || tipo == "bulleted_list_item"
+      def inalterado?(estado, assinaturas)
+        return false if estado.nil?
 
-          if tipo == "heading_2"
-            dentro = texto_do(block).include?(marcador)
-            next
-          end
-          block if dentro
+        Array(estado[:blocks]).map { |b| b[:signature] } == assinaturas
+      end
+
+      # Ano + data do header, procurado no documento — usado quando o ledger
+      # sumiu mas o header (criado por nós antes) continua na page.
+      def achar_header(day)
+        marcador = Renderers::BragBlocks.data_do_dia(day)
+        @client.block_children(@page_id).find do |block|
+          block.fetch("type") == "heading_2" && texto_do(block).start_with?(marcador)
+        end&.fetch("id")
+      end
+
+      def criar(bloco, after: nil)
+        @client.append_block_children(@page_id, [ bloco ], after:).fetch("results").first.fetch("id")
+      end
+
+      # Apaga só o que está no ledger. `delete_block` trata 404 como sucesso
+      # (o bloco pode ter sido apagado à mão no Notion). O DELETE do pai leva
+      # os filhos junto (verificado contra a API em 2026-10-21).
+      def apagar_do_dia(estado)
+        Array(estado&.dig(:blocks)).each do |bloco|
+          @client.delete_block(bloco.fetch(:id))
+        rescue Tracker::Notion::ApiError => e
+          @logger.warn("[tracking] não deu para apagar block #{bloco[:id]}: #{e.message}")
         end
       end
 
-      def header_existe?(day)
-        @client.block_children(@page_id).any? do |block|
-          block.fetch("type") == "heading_2" && texto_do(block) == marcador_do_dia(day)
+      # Escreve em lotes de 100. Cada lote entra DEPOIS do último bloco criado
+      # (não sempre depois do mesmo `after`, senão o segundo lote cairia antes
+      # do primeiro e o dia sairia em ordem invertida).
+      def escrever(blocos, after:)
+        ids = []
+        blocos.each_slice(LOTE_DE_BLOCKS) do |lote|
+          resposta = @client.append_block_children(@page_id, lote, after:)
+          novos = Array(resposta["results"]).map { |b| b.fetch("id") }
+          ids.concat(novos)
+          after = novos.last
         end
-      end
-
-      def header_do_dia(day)
-        {
-          object: "block",
-          type: "heading_2",
-          heading_2: { rich_text: [ { type: "text", text: { content: marcador_do_dia(day) } } ] }
-        }
-      end
-
-      # Bloco da entrega + seus sub-bullets de contexto, aninhados sob ela
-      # (children no próprio bullet: no Notion aparecem indentados e
-      # recolhíveis, sem ocupar uma linha a mais quando o dia tem muitas).
-      def blocos_da(entrega)
-        [ bullet_da(entrega) ].tap do |blocos|
-          blocos.first[:bulleted_list_item][:children] = sub_bullets_da(entrega)
-        end
-      end
-
-      def bullet_da(entrega)
-        {
-          object: "block",
-          type: "bulleted_list_item",
-          bulleted_list_item: { rich_text: texto_do_bullet(entrega) }
-        }
-      end
-
-      # "[Jira] Movido [id] In Progress → Review " + título com link.
-      # O detail (o que mudou) fica em negrito, antes do título.
-      def texto_do_bullet(entrega)
-        textos = [ { type: "text", text: { content: "#{rotulo_da(entrega)} [#{entrega.external_id}] " } } ]
-        if entrega.detail.present?
-          textos << { type: "text", text: { content: "#{entrega.detail} " },
-                      annotations: { bold: true } }
-        end
-        textos << { type: "text", text: { content: entrega.title, link: { url: entrega.url } } }
-      end
-
-      def sub_bullets_da(entrega)
-        Array(entrega.context).reject(&:blank?).map do |linha|
-          {
-            object: "block",
-            type: "bulleted_list_item",
-            bulleted_list_item: {
-              rich_text: [ { type: "text", text: { content: linha } } ]
-            }
-          }
-        end
-      end
-
-      # Formato do bullet (decisão #12): fonte clicável + descrição.
-      def rotulo_da(entrega)
-        prefixo = { jira: "[Jira]", github: "[GitHub]" }.fetch(entrega.source, "[?]")
-        sufixo = { card_movido: "Movido", reviewer: "Reviewer", pr_aberto: "PR aberto",
-                   review: "Review", commit: "Commit" }.fetch(entrega.kind, "")
-        "#{prefixo} #{sufixo}"
-      end
-
-      def marcador_do_dia(day)
-        day.strftime("%d/%m/%Y")
+        ids
       end
 
       def texto_do(block)
         block.fetch(block.fetch("type")).fetch("rich_text").map { |t| t.fetch("plain_text") }.join
-      end
-
-      # O external_id é o segmento [..] depois do rótulo ("[Jira] Movido [ID]
-      # ...") — scan dos bracketed: o 1º é o rótulo da fonte, o 2º é o id.
-      def external_id_do(texto)
-        segmentos = texto.scan(/\[([^\]]+)\]/).flatten
-        segmentos[1] if segmentos.size >= 2
       end
     end
   end
