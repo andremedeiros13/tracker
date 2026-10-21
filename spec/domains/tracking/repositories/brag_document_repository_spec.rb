@@ -6,7 +6,7 @@ require "tmpdir"
 RSpec.describe Tracking::Repositories::BragDocumentRepository do
   let(:client) { instance_double(Tracker::Notion::Client) }
   let(:dir) { Dir.mktmpdir }
-  let(:ledger) { Tracker::Tracking::BlockLedger.new(path: File.join(dir, "state.json"), page_id: "page-brag",
+  let(:ledger) { Tracker::Brag::BlockLedger.new(path: File.join(dir, "state.json"), page_id: "page-brag",
                                                     logger: instance_double(ActiveSupport::Logger, warn: nil, error: nil)) }
   let(:repository) { described_class.new(client: client, page_id: "page-brag", ledger: ledger,
                                          logger: instance_double(ActiveSupport::Logger, warn: nil, error: nil)) }

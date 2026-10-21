@@ -23,7 +23,7 @@ module Tracking
                      logger: Rails.logger)
         @client = client
         @page_id = page_id
-        @ledger = ledger || Tracker::Tracking::BlockLedger.new(page_id: page_id)
+        @ledger = ledger || Tracker::Brag::BlockLedger.new(page_id: page_id)
         @logger = logger
       end
 

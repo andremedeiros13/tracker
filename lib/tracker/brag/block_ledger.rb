@@ -4,7 +4,7 @@ require "json"
 require "fileutils"
 
 module Tracker
-  module Tracking
+  module Brag
     # Ledger local dos blocks que o Tracker escreveu no Brag document.
     #
     # Existe porque o Brag é reconstruído (delete + rewrite), não appendado:

@@ -12,7 +12,7 @@ module Tracking
     class AdoptBragSection
       def initialize(brag: nil, ledger: nil, logger: Rails.logger, stdout: $stdout)
         @brag = brag || Repositories::BragDocumentRepository.new
-        @ledger = ledger || Tracker::Tracking::BlockLedger.new(page_id: ENV.fetch("TRACER_NOTION_BRAG_PAGE_ID"))
+        @ledger = ledger || Tracker::Brag::BlockLedger.new(page_id: ENV.fetch("TRACER_NOTION_BRAG_PAGE_ID"))
         @logger = logger
         @stdout = stdout
       end

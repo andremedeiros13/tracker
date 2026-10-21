@@ -3,7 +3,7 @@
 require "rails_helper"
 require "tmpdir"
 
-RSpec.describe Tracker::Tracking::BlockLedger do
+RSpec.describe Tracker::Brag::BlockLedger do
   let(:dir) { Dir.mktmpdir }
   let(:path) { File.join(dir, "tracking", "brag_state.json") }
   let(:logger) { instance_double(ActiveSupport::Logger, warn: nil, error: nil) }
