@@ -8,7 +8,8 @@ module Tracker
   module Jira
     # Cliente HTTP puro do Jira Cloud (pesquisa #4 — sem gem de terceiro no
     # seam, mesmo padrão do Notion client). Auth Basic email:token; a
-    # superfície usada: search JQL, changelog, field/search, myself.
+    # superfície usada: search JQL, changelog (individual e em lote),
+    # field/search, myself.
     class Client
       # Janela de busca JQL em dias (issues atualizadas recentemente — o
       # filtro do dia alvo acontece client-side no changelog).
@@ -66,6 +67,27 @@ module Tracker
         entradas
       end
 
+      # Teto de issues por request do bulkfetch (a API responde 400 acima).
+      LOTE_MAX_ISSUES = 1000
+
+      # Changelog de vários issues em lote — 1 request por 1000 issues em vez
+      # de um request por issue (era o N+1 que travava o ciclo por minutos).
+      # Retorna { "<issueId>" => [histórias] }, com o MESMO shape do changelog
+      # individual, exceto:
+      #   - "created" vem em epoch ms (no individual vem em ISO 8601);
+      #   - "author" vem como accountId (no individual vem como {accountId:}).
+      # A normalização é do adapter (JiraDeliveryRepository).
+      #
+      # maxResults é um orçamento de histórias por página; o resto vem por
+      # nextPageToken.
+      def changelog_em_lote(issue_ids, max_results: 1000)
+        por_issue = Hash.new { |hash, chave| hash[chave] = [] }
+        issue_ids.uniq.each_slice(LOTE_MAX_ISSUES) do |lote|
+          buscar_historias_do_lote(lote, por_issue, max_results)
+        end
+        por_issue
+      end
+
       # Descoberta de custom fields — retorna o customfield_XXXXX usado no
       # changelog (fieldId). Usado pelo DiscoverReviewer.
       def discover_fields(query:)
@@ -75,6 +97,21 @@ module Tracker
       end
 
       private
+
+      # Pagina um lote (até LOTE_MAX_ISSUES) até esgotar nextPageToken.
+      def buscar_historias_do_lote(lote, por_issue, max_results)
+        token = nil
+        loop do
+          body = { issueIdsOrKeys: lote, maxResults: max_results }
+          body[:nextPageToken] = token if token
+          resposta = request(:Post, "/rest/api/3/changelog/bulkfetch", body:)
+          resposta.fetch("issueChangeLogs").each do |log|
+            por_issue[log.fetch("issueId")].concat(log.fetch("changeHistories", []))
+          end
+          token = resposta["nextPageToken"]
+          break unless token
+        end
+      end
 
       def request(method, path, body: nil, query: nil)
         uri = URI("#{@site}#{path}")

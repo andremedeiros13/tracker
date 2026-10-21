@@ -57,6 +57,59 @@ RSpec.describe Tracker::Jira::Client do
     end
   end
 
+  describe "#changelog_em_lote" do
+    it "busca o changelog de vários issues e agrupa por issueId" do
+      stub_request([
+        http_success({
+          "issueChangeLogs" => [
+            { "issueId" => "1", "changeHistories" => [ { "id" => "h1" } ] },
+            { "issueId" => "2", "changeHistories" => [ { "id" => "h2" }, { "id" => "h3" } ] }
+          ]
+        })
+      ])
+
+      resultado = client.changelog_em_lote([ "1", "2" ])
+
+      expect(resultado["1"].map { |e| e["id"] }).to eq([ "h1" ])
+      expect(resultado["2"].map { |e| e["id"] }).to eq([ "h2", "h3" ])
+    end
+
+    it "pagina por nextPageToken até esgotar" do
+      stub_request([
+        http_success({ "issueChangeLogs" => [ { "issueId" => "1", "changeHistories" => [ { "id" => "h1" } ] } ],
+                       "nextPageToken" => "t2" }),
+        http_success({ "issueChangeLogs" => [ { "issueId" => "1", "changeHistories" => [ { "id" => "h2" } ] } ] })
+      ])
+
+      resultado = client.changelog_em_lote([ "1" ])
+
+      expect(resultado["1"].map { |e| e["id"] }).to eq([ "h1", "h2" ])
+    end
+
+    it "não quebra quando um issue não tem histórico" do
+      stub_request([
+        http_success({ "issueChangeLogs" => [ { "issueId" => "1" } ] })
+      ])
+
+      expect(client.changelog_em_lote([ "1" ])["1"]).to eq([])
+    end
+
+    it "quebra em lotes de 1000 issues (teto da API) e consolida o resultado" do
+      ids = Array.new(1001) { |i| i.to_s }
+      http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:start).and_yield(http)
+      lotes = []
+      allow(http).to receive(:request) do |req|
+        lotes << JSON.parse(req.body)["issueIdsOrKeys"].size
+        http_success({ "issueChangeLogs" => [] })
+      end
+
+      client.changelog_em_lote(ids)
+
+      expect(lotes).to eq([ 1000, 1 ])
+    end
+  end
+
   describe "#discover_fields" do
     it "busca custom fields com type=custom" do
       req = nil

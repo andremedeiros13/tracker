@@ -99,6 +99,23 @@ rake one_on_ones:import            # importa as transcrições agora (útil p/ t
 
 > O `rake` não carrega o `.env` — rode antes: `set -a; source .env; set +a`
 
+## Quando algo não entra no Notion
+
+O daemon é silencioso no sucesso; falha aparece no log, com o nome da etapa:
+
+```bash
+tail -f log/development.log              # ciclos: notify: / tracking: / one-on-ones:
+journalctl --user -u tracker.service -f  # boot, crash, OOM e reinício
+```
+
+Cada etapa do ciclo resgata o próprio erro: uma falha no Tracking não impede a
+importação de 1-on-1. O `/up` respondendo 200 só prova que o servidor subiu, não
+que o ciclo rodou — para isso, olhe o log.
+
+Se o processo morrer sem traceback (`Killed`), foi o teto de memória do unit
+(`MemoryMax=2G`) e o systemd reinicia em 5s — o reinício também pega código
+novo, então editar o código sem reiniciar não muda o comportamento.
+
 ## Rodar no login (opcional, recomendado)
 
 Se o daemon não sobe no login, você precisa lembrar de iniciar — o que mata o

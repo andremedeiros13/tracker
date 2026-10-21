@@ -8,11 +8,16 @@ RSpec.describe Tracking::Repositories::JiraDeliveryRepository do
   let(:dia) { Date.new(2026, 10, 14) }
 
   def issue(key, summary = "Resumo do card")
-    { "key" => key, "fields" => { "summary" => summary } }
+    { "id" => "id-#{key}", "key" => key, "fields" => { "summary" => summary } }
   end
 
+  # Shape do bulkfetch: "author" é o accountId direto e "created" é epoch ms.
   def changelog_entrada(id:, account_id:, created:, items:)
-    { "id" => id, "author" => { "accountId" => account_id }, "created" => created, "items" => items }
+    { "id" => id, "author" => account_id, "created" => epoch_ms(created), "items" => items }
+  end
+
+  def epoch_ms(iso)
+    (Time.zone.parse(iso).to_f * 1000).to_i
   end
 
   def item(field_id, to_string = "In Progress")
@@ -21,15 +26,17 @@ RSpec.describe Tracking::Repositories::JiraDeliveryRepository do
 
   before do
     allow(client).to receive(:search).and_return([ issue("ENG-1") ])
-    allow(client).to receive(:changelog).and_return([])
+    allow(client).to receive(:changelog_em_lote).and_return({})
   end
 
   describe "#entregas_do_dia" do
     it "coleta card movido pelo engenheiro no dia (status no changelog)" do
-      allow(client).to receive(:changelog).and_return([
-        changelog_entrada(id: "10001", account_id: "acc-1", created: "2026-10-14T10:00:00.000+0000", items: [ item("status") ]),
-        changelog_entrada(id: "10002", account_id: "outro", created: "2026-10-14T10:00:00.000+0000", items: [ item("status") ])
-      ])
+      allow(client).to receive(:changelog_em_lote).and_return({
+        "id-ENG-1" => [
+          changelog_entrada(id: "10001", account_id: "acc-1", created: "2026-10-14T10:00:00.000+0000", items: [ item("status") ]),
+          changelog_entrada(id: "10002", account_id: "outro", created: "2026-10-14T10:00:00.000+0000", items: [ item("status") ])
+        ]
+      })
 
       entregas = repository.entregas_do_dia(dia)
 
@@ -42,18 +49,22 @@ RSpec.describe Tracking::Repositories::JiraDeliveryRepository do
     end
 
     it "exclui mudanças de outros dias" do
-      allow(client).to receive(:changelog).and_return([
-        changelog_entrada(id: "10001", account_id: "acc-1", created: "2026-10-13T10:00:00.000+0000", items: [ item("status") ])
-      ])
+      allow(client).to receive(:changelog_em_lote).and_return({
+        "id-ENG-1" => [
+          changelog_entrada(id: "10001", account_id: "acc-1", created: "2026-10-13T10:00:00.000+0000", items: [ item("status") ])
+        ]
+      })
 
       expect(repository.entregas_do_dia(dia)).to be_empty
     end
 
     it "coleta mudança no campo Reviewer (customfield via changelog)" do
-      allow(client).to receive(:changelog).and_return([
-        changelog_entrada(id: "10003", account_id: "acc-1", created: "2026-10-14T11:00:00.000+0000",
-                          items: [ item("customfield_10000", "acc-2") ])
-      ])
+      allow(client).to receive(:changelog_em_lote).and_return({
+        "id-ENG-1" => [
+          changelog_entrada(id: "10003", account_id: "acc-1", created: "2026-10-14T11:00:00.000+0000",
+                            items: [ item("customfield_10000", "acc-2") ])
+        ]
+      })
 
       entregas = repository.entregas_do_dia(dia)
 
@@ -62,10 +73,12 @@ RSpec.describe Tracking::Repositories::JiraDeliveryRepository do
 
     it "ignora o campo Reviewer quando JIRA_REVIEWER_FIELD_ID não está configurado" do
       repository_sem_reviewer = described_class.new(client: client, account_id: "acc-1", reviewer_field_id: nil)
-      allow(client).to receive(:changelog).and_return([
-        changelog_entrada(id: "10003", account_id: "acc-1", created: "2026-10-14T11:00:00.000+0000",
-                          items: [ item("customfield_10000", "acc-2") ])
-      ])
+      allow(client).to receive(:changelog_em_lote).and_return({
+        "id-ENG-1" => [
+          changelog_entrada(id: "10003", account_id: "acc-1", created: "2026-10-14T11:00:00.000+0000",
+                            items: [ item("customfield_10000", "acc-2") ])
+        ]
+      })
 
       expect(repository_sem_reviewer.entregas_do_dia(dia)).to be_empty
     end
@@ -76,15 +89,48 @@ RSpec.describe Tracking::Repositories::JiraDeliveryRepository do
       expect(client).to have_received(:search).with("updated >= -2d ORDER BY updated DESC")
     end
 
-    it "agrega entregas de múltiplos issues" do
+    it "agrega entregas de múltiplos issues em uma única chamada de lote" do
       allow(client).to receive(:search).and_return([ issue("ENG-1"), issue("ENG-2") ])
-      allow(client).to receive(:changelog) do |key|
-        [ changelog_entrada(id: "10001", account_id: "acc-1", created: "2026-10-14T10:00:00.000+0000", items: [ item("status") ]) ]
-      end
+      allow(client).to receive(:changelog_em_lote).and_return({
+        "id-ENG-1" => [ changelog_entrada(id: "10001", account_id: "acc-1", created: "2026-10-14T10:00:00.000+0000", items: [ item("status") ]) ],
+        "id-ENG-2" => [ changelog_entrada(id: "10001", account_id: "acc-1", created: "2026-10-14T10:00:00.000+0000", items: [ item("status") ]) ]
+      })
 
       expect(repository.entregas_do_dia(dia).map(&:external_id)).to eq(
         [ "ENG-1:10001:status", "ENG-2:10001:status" ]
       )
+      expect(client).to have_received(:changelog_em_lote).once.with([ "id-ENG-1", "id-ENG-2" ])
+    end
+
+    it "não chama o lote quando a busca não retorna issues" do
+      allow(client).to receive(:search).and_return([])
+
+      expect(repository.entregas_do_dia(dia)).to be_empty
+      expect(client).not_to have_received(:changelog_em_lote)
+    end
+
+    it "ignora itens sem fieldId (campo Rank vem só com field/fieldtype)" do
+      allow(client).to receive(:changelog_em_lote).and_return({
+        "id-ENG-1" => [
+          changelog_entrada(id: "10001", account_id: "acc-1", created: "2026-10-14T10:00:00.000+0000", items: [
+            { "field" => "Classificação", "fieldtype" => "custom", "fromString" => "", "toString" => "Ranked higher" },
+            item("status")
+          ])
+        ]
+      })
+
+      expect(repository.entregas_do_dia(dia).map(&:external_id)).to eq([ "ENG-1:10001:status" ])
+    end
+
+    it "aceita o shape do changelog individual (created ISO 8601, author em hash)" do
+      allow(client).to receive(:changelog_em_lote).and_return({
+        "id-ENG-1" => [
+          { "id" => "10001", "author" => { "accountId" => "acc-1" },
+            "created" => "2026-10-14T10:00:00.000+0000", "items" => [ item("status") ] }
+        ]
+      })
+
+      expect(repository.entregas_do_dia(dia).map(&:external_id)).to eq([ "ENG-1:10001:status" ])
     end
   end
 end

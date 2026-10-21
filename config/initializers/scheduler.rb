@@ -23,6 +23,7 @@ module Tracker
           sleep intervalo_segundos
         rescue StandardError => e
           Rails.logger.error("[tracker-scheduler] #{e.class}: #{e.message}")
+          sleep intervalo_segundos
         end
       end
     end
@@ -33,12 +34,21 @@ module Tracker
       [ ENV.fetch("TRACER_NOTIFY_INTERVAL_MINUTES", "45").to_i * 60, INTERVALO_MINIMO_SEGUNDOS ].max
     end
 
+    # As três etapas são independentes: cada uma resgata o próprio erro, senão
+    # uma falha (ex.: Notion fora) pula as seguintes — e o 1-on-1 nunca roda.
     def disparar_se_no_periodo
       return unless periodo_ativo?
 
-      Todos::UseCases::NotifyPendingTodos.new.call
+      notificar_pendencias
       coletar_entregas
       importar_transcricoes
+    end
+
+    # Notificação nativa com o resumo das pendências. Resgatada.
+    def notificar_pendencias
+      Todos::UseCases::NotifyPendingTodos.new.call
+    rescue StandardError => e
+      Rails.logger.error("[tracker-scheduler] notify: #{e.class}: #{e.message}")
     end
 
     # Ciclo do Tracking: coleta as entregas do dia e appenda no Brag document

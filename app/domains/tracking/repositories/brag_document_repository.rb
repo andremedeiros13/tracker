@@ -42,7 +42,7 @@ module Tracking
         dentro = false
         @client.block_children(@page_id).filter_map do |block|
           tipo = block.fetch("type")
-          next unless tipo == "heading_2" || tipo == "bulleted_list"
+          next unless tipo == "heading_2" || tipo == "bulleted_list_item"
 
           if tipo == "heading_2"
             dentro = texto_do(block).include?(marcador)
@@ -69,8 +69,8 @@ module Tracking
       def bullet_da(entrega)
         {
           object: "block",
-          type: "bulleted_list",
-          bulleted_list: {
+          type: "bulleted_list_item",
+          bulleted_list_item: {
             rich_text: [
               { type: "text", text: { content: "#{rotulo_da(entrega)} [#{entrega.external_id}] " } },
               { type: "text", text: { content: entrega.title.sub(/\A[^:]+:\s*/, ""), link: { url: entrega.url } } }

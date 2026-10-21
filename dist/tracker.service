@@ -9,6 +9,10 @@ ExecStart=%h/Repositories/tracker/bin/start
 Restart=on-failure
 RestartSec=5s
 SyslogIdentifier=tracker
+# Teto de memória: o pico já chegou a 22,7G (OOM killer do kernel, 2026-10-20).
+# Com o limite, estourar mata só o daemon — o systemd reinicia — em vez de
+# arriscar a sessão inteira.
+MemoryMax=2G
 
 [Install]
 WantedBy=default.target
