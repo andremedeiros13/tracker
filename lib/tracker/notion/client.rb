@@ -9,6 +9,11 @@ module Tracker
     # A superfície usada é pequena: GET database, POST query, POST pages,
     # POST/GET blocks, (PATCH page).
     class Client
+      # Sem timeout, um socket pendurado trava o ciclo inteiro do daemon (o
+      # tracking ficou 199s num ciclo que normalmente leva 8s). 10s para abrir
+      # e 30s para ler cobre com folga o payload do bulkfetch do Jira.
+      TIMEOUT_ABERTURA = 10
+      TIMEOUT_LEITURA = 30
       BASE = "https://api.notion.com/v1"
       VERSION = "2022-06-28"
 
@@ -98,7 +103,7 @@ module Tracker
         req["Content-Type"] = "application/json"
         req.body = JSON.generate(body) if body
 
-        resposta = com_retry_429 { Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |http| http.request(req) } }
+        resposta = com_retry_429 { Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: TIMEOUT_ABERTURA, read_timeout: TIMEOUT_LEITURA) { |http| http.request(req) } }
         raise ApiError.new(resposta.code, resposta.body) unless resposta.is_a?(Net::HTTPSuccess)
 
         JSON.parse(resposta.body)

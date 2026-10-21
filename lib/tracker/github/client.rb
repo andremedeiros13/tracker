@@ -9,6 +9,11 @@ module Tracker
     # no seam). Token do ENV ou do gh CLI já autenticado; a superfície usada:
     # busca de PRs/commits, reviews de PR, user autenticado.
     class Client
+      # Sem timeout, um socket pendurado trava o ciclo inteiro do daemon (o
+      # tracking ficou 199s num ciclo que normalmente leva 8s). 10s para abrir
+      # e 30s para ler cobre com folga o payload do bulkfetch do Jira.
+      TIMEOUT_ABERTURA = 10
+      TIMEOUT_LEITURA = 30
       BASE = "https://api.github.com"
 
       def initialize(token:)
@@ -72,7 +77,7 @@ module Tracker
         req["Content-Type"] = "application/json"
         req.body = JSON.generate(body) if body
 
-        resposta = Net::HTTP.start(uri.host, uri.port, use_ssl: true) { |http| http.request(req) }
+        resposta = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: TIMEOUT_ABERTURA, read_timeout: TIMEOUT_LEITURA) { |http| http.request(req) }
         raise ApiError.new(resposta.code, resposta.body) unless resposta.is_a?(Net::HTTPSuccess)
 
         JSON.parse(resposta.body)
