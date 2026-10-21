@@ -48,7 +48,14 @@ module Tracker
       end
 
       def executar(agora)
+        # Loga início e fim com duração: sem isso um job travado era
+        # indistinguível de um job que terminou sem novidade (o log só aparecia
+        # no fim, e "sem log" parecia "parado").
+        @logger.info("[tracker] #{@nome} iniciando")
+        inicio = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         @run.call
+        duracao = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - inicio).round(1)
+        @logger.info("[tracker] #{@nome} concluído em #{duracao}s")
         @ultimo_sucesso_em = agora
         @proximo_em = agora + @intervalo
       rescue StandardError => e
