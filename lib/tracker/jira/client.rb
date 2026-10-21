@@ -35,12 +35,17 @@ module Tracker
         request(:Get, "/rest/api/3/myself")
       end
 
+      # Tamanho de página da busca. A API aceita 5000: uma janela de 2 dias
+      # (~3.500 issues) vem em 1 request de ~1,4s, contra 70 requests e ~34s
+      # com o default de 50.
+      BUSCA_MAX_ISSUES = 5000
+
       # Busca por JQL (v3) — paginado por nextPageToken.
       def search(jql)
         issues = []
         token = nil
         loop do
-          query = { jql:, maxResults: 50, fields: "key,summary" }
+          query = { jql:, maxResults: BUSCA_MAX_ISSUES, fields: "key,summary" }
           query[:nextPageToken] = token if token
           body = request(:Get, "/rest/api/3/search/jql", query:)
           issues.concat(body.fetch("issues"))
@@ -79,8 +84,9 @@ module Tracker
       # A normalização é do adapter (JiraDeliveryRepository).
       #
       # maxResults é um orçamento de histórias por página; o resto vem por
-      # nextPageToken.
-      def changelog_em_lote(issue_ids, max_results: 1000)
+      # nextPageToken. 5000 mede ~10,6s por lote de 1000 issues, contra 16,7s
+      # com 1000 (12 páginas → 3).
+      def changelog_em_lote(issue_ids, max_results: 5000)
         por_issue = Hash.new { |hash, chave| hash[chave] = [] }
         issue_ids.uniq.each_slice(LOTE_MAX_ISSUES) do |lote|
           buscar_historias_do_lote(lote, por_issue, max_results)

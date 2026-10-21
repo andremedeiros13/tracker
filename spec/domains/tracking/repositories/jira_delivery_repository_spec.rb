@@ -4,7 +4,7 @@ require "rails_helper"
 
 RSpec.describe Tracking::Repositories::JiraDeliveryRepository do
   let(:client) { instance_double(Tracker::Jira::Client) }
-  let(:repository) { described_class.new(client: client, account_id: "acc-1", reviewer_field_id: "customfield_10000") }
+  let(:repository) { described_class.new(client: client, account_id: "acc-1", reviewer_field_id: "customfield_10000", filtro: "largo") }
   let(:dia) { Date.new(2026, 10, 14) }
 
   def issue(key, summary = "Resumo do card")
@@ -87,6 +87,32 @@ RSpec.describe Tracking::Repositories::JiraDeliveryRepository do
       repository.entregas_do_dia(dia)
 
       expect(client).to have_received(:search).with("updated >= -2d ORDER BY updated DESC")
+    end
+
+    context "com TRACER_JIRA_FILTRO=estreito" do
+      let(:repository) do
+        described_class.new(client: client, account_id: "acc-1",
+                            reviewer_field_id: "customfield_10125", filtro: "estreito")
+      end
+
+      it "restringe a busca à participação do usuário (incluindo o Reviewer)" do
+        repository.entregas_do_dia(dia)
+
+        expect(client).to have_received(:search).with(
+          "updated >= -2d AND (status CHANGED BY currentUser() OR assignee = currentUser()" \
+          " OR reporter = currentUser() OR cf[10125] = currentUser()) ORDER BY updated DESC"
+        )
+      end
+
+      it "omite o critério de Reviewer quando o campo não está configurado" do
+        sem_reviewer = described_class.new(client: client, account_id: "acc-1", filtro: "estreito")
+        sem_reviewer.entregas_do_dia(dia)
+
+        expect(client).to have_received(:search).with(
+          "updated >= -2d AND (status CHANGED BY currentUser() OR assignee = currentUser()" \
+          " OR reporter = currentUser()) ORDER BY updated DESC"
+        )
+      end
     end
 
     it "agrega entregas de múltiplos issues em uma única chamada de lote" do

@@ -9,11 +9,13 @@ module Tracking
       def initialize(client: Tracker::Jira::Client.from_env,
                      site: ENV.fetch("JIRA_SITE", "https://rdstation.atlassian.net"),
                      account_id: ENV.fetch("JIRA_ACCOUNT_ID"),
-                     reviewer_field_id: ENV["JIRA_REVIEWER_FIELD_ID"])
+                     reviewer_field_id: ENV["JIRA_REVIEWER_FIELD_ID"],
+                     filtro: ENV.fetch("TRACER_JIRA_FILTRO", "largo"))
         @client = client
         @site = site
         @account_id = account_id
         @reviewer_field_id = reviewer_field_id
+        @filtro = filtro
       end
 
       # Entregas do dia: busca issues atualizadas na janela (JQL), baixa o
@@ -29,8 +31,35 @@ module Tracking
 
       private
 
+      # "largo" (default): tudo que mudou na janela — zero risco de perder
+      # entrega, ~42s por ciclo. "estreito": só cards com a sua participação
+      # — ~3s, mas o Jira NÃO aceita "CHANGED BY" em custom field, então o
+      # Reviewer só entra se o card também tiver você como assignee/reporter
+      # ou tiver tido status mexido por você (6/6 coberto nos 6 dias medidos
+      # em 2026-10-21 — amostra pequena, não é garantia).
       def jql_da_janela
-        "updated >= -#{Tracker::Jira::Client::JANELA_JQL_DIAS}d ORDER BY updated DESC"
+        base = "updated >= -#{Tracker::Jira::Client::JANELA_JQL_DIAS}d"
+        return "#{base} ORDER BY updated DESC" unless @filtro == "estreito"
+
+        "#{base} AND (#{criterios_de_participacao}) ORDER BY updated DESC"
+      end
+
+      # Condições que caracterizam "eu participei deste card". O Reviewer só
+      # entra se o campo estiver configurado (o JQL exige o id numérico).
+      def criterios_de_participacao
+        criterios = [
+          "status CHANGED BY currentUser()",
+          "assignee = currentUser()",
+          "reporter = currentUser()"
+        ]
+        criterios << "cf[#{id_numerico_do_reviewer}] = currentUser()" if id_numerico_do_reviewer
+        criterios.join(" OR ")
+      end
+
+      # JQL não aceita o id cru do custom field: cf[customfield_10125] dá 400,
+      # o formato válido é cf[10125].
+      def id_numerico_do_reviewer
+        @reviewer_field_id.to_s[/\d+\z/].presence
       end
 
       def entregas_do_issue(issue, entradas, day)
