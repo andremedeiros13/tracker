@@ -29,18 +29,21 @@ module Tracker
       # Serializa quem escreve no Brag. O daemon e um `rake tracking:rebuild`
       # rodando ao mesmo tempo (ou dois ticks sobrepostos) reescreviam a mesma
       # seção em paralelo — o resultado foram sentinels duplicados e ids no
-      # ledger sem assinatura. O lock é por arquivo (flock), vale entre
-      # processos; `with_lock` devolve nil se não conseguir em `timeout`.
-      def with_lock(timeout: 120)
+      # ledger sem assinatura.
+      #
+      # Espera no máximo `timeout` (default 5s): o ciclo roda a cada 30 min, então
+      # é melhor desistir e tentar no próximo tick do que segurar a thread do
+      # scheduler atrás de um `rake` interativo. Devolve nil quando não pega.
+      def with_lock(timeout: 5)
         FileUtils.mkdir_p(File.dirname(@lock_path))
         File.open(@lock_path, File::RDWR | File::CREAT, 0o644) do |arquivo|
           inicio = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           until arquivo.flock(File::LOCK_EX | File::LOCK_NB)
             if Process.clock_gettime(Process::CLOCK_MONOTONIC) - inicio > timeout
-              @logger.warn("[tracking] Brag ocupado há mais de #{timeout}s — pulando este ciclo")
+              @logger.info("[tracking] Brag em uso por outro processo — pulando este ciclo")
               return nil
             end
-            sleep 0.5
+            sleep 0.2
           end
           yield
         end

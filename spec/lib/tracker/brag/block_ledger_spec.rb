@@ -6,7 +6,7 @@ require "tmpdir"
 RSpec.describe Tracker::Brag::BlockLedger do
   let(:dir) { Dir.mktmpdir }
   let(:path) { File.join(dir, "tracking", "brag_state.json") }
-  let(:logger) { instance_double(ActiveSupport::Logger, warn: nil, error: nil) }
+  let(:logger) { instance_double(ActiveSupport::Logger, warn: nil, error: nil, info: nil) }
   let(:ledger) { described_class.new(path: path, page_id: "page-brag", logger: logger) }
   let(:dia) { Date.new(2026, 10, 21) }
 
@@ -63,6 +63,28 @@ RSpec.describe Tracker::Brag::BlockLedger do
       File.write(path, JSON.generate({ "version" => 99, "page_id" => "page-brag", "days" => { "2026-10-21" => { "header_id" => "x" } } }))
 
       expect(ledger.day(dia)).to be_nil
+    end
+  end
+
+  describe "#with_lock" do
+    it "executa o bloco quando o lock está livre" do
+      expect(ledger.with_lock { :feito }).to eq(:feito)
+    end
+
+    it "desiste rápido quando outro processo segura o lock" do
+      FileUtils.mkdir_p(File.dirname(path))
+      outro = File.open("#{path}.lock", File::RDWR | File::CREAT)
+      outro.flock(File::LOCK_EX | File::LOCK_NB)
+      comecou = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+      resultado = ledger.with_lock(timeout: 0.5) { :nunca }
+
+      decorrido = Process.clock_gettime(Process::CLOCK_MONOTONIC) - comecou
+      expect(resultado).to be_nil
+      expect(decorrido).to be < 3
+    ensure
+      outro&.flock(File::LOCK_UN)
+      outro&.close
     end
   end
 
