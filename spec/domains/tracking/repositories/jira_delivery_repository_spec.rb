@@ -86,7 +86,10 @@ RSpec.describe Tracking::Repositories::JiraDeliveryRepository do
     it "busca issues com JQL de janela de 2 dias" do
       repository.entregas_do_dia(dia)
 
-      expect(client).to have_received(:search).with("updated >= -2d ORDER BY updated DESC")
+      expect(client).to have_received(:search).with(
+        "updated >= -2d ORDER BY updated DESC",
+        fields: "key,summary,issuetype,parent,components,description"
+      )
     end
 
     context "com TRACER_JIRA_FILTRO=estreito" do
@@ -100,7 +103,8 @@ RSpec.describe Tracking::Repositories::JiraDeliveryRepository do
 
         expect(client).to have_received(:search).with(
           "updated >= -2d AND (status CHANGED BY currentUser() OR assignee = currentUser()" \
-          " OR reporter = currentUser() OR cf[10125] = currentUser()) ORDER BY updated DESC"
+          " OR reporter = currentUser() OR cf[10125] = currentUser()) ORDER BY updated DESC",
+          fields: "key,summary,issuetype,parent,components,description"
         )
       end
 
@@ -110,7 +114,8 @@ RSpec.describe Tracking::Repositories::JiraDeliveryRepository do
 
         expect(client).to have_received(:search).with(
           "updated >= -2d AND (status CHANGED BY currentUser() OR assignee = currentUser()" \
-          " OR reporter = currentUser()) ORDER BY updated DESC"
+          " OR reporter = currentUser()) ORDER BY updated DESC",
+          fields: "key,summary,issuetype,parent,components,description"
         )
       end
     end

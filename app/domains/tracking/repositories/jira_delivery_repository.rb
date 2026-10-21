@@ -6,6 +6,18 @@ module Tracking
     # dia — cards movidos e mudanças no campo Reviewer, via changelog REST
     # API (JQL history não alcança custom fields — pesquisa #4).
     class JiraDeliveryRepository
+      # Tamanho máximo do resumo de contexto (primeira frase da descrição) —
+      # o Brag é registro escaneável, não a descrição inteira do card.
+      RESUME_MAX_CHARS = 180
+
+      # Nome do épico no sub-bullet: só o suficiente para situar o card.
+      EPICO_MAX_CHARS = 60
+
+      # Campos trazidos na busca: os dois primeiros o adapter já usava; o resto
+      # alimenta o contexto do bullet (tipo, épico, componente e a descrição,
+      # de onde sai a primeira frase).
+      CAMPOS_DO_CONTEXTO = "key,summary,issuetype,parent,components,description"
+
       def initialize(client: Tracker::Jira::Client.from_env,
                      site: ENV.fetch("JIRA_SITE", "https://rdstation.atlassian.net"),
                      account_id: ENV.fetch("JIRA_ACCOUNT_ID"),
@@ -22,7 +34,7 @@ module Tracking
       # changelog de todas em lote (bulkfetch) e filtra as entradas do
       # engenheiro no dia alvo.
       def entregas_do_dia(day)
-        issues = @client.search(jql_da_janela)
+        issues = @client.search(jql_da_janela, fields: CAMPOS_DO_CONTEXTO)
         return [] if issues.empty?
 
         changelogs = @client.changelog_em_lote(issues.map { |issue| issue.fetch("id") })
@@ -86,12 +98,80 @@ module Tracking
           Entities::Delivery.new(
             source: :jira,
             kind: item.fetch("fieldId") == "status" ? :card_movido : :reviewer,
-            title: "#{item.fetch("field")}: #{issue.fetch('key')} — #{issue.fetch('fields').fetch('summary')}",
+            title: "#{issue.fetch('key')} — #{resumo_do_issue(issue)}",
+            detail: resumo_da_mudanca(item),
+            context: contexto_do_issue(issue),
             url: url_do_card(issue.fetch("key")),
             occurred_at: criado_em(entrada),
             external_id: "#{issue.fetch('key')}:#{entrada.fetch('id')}:#{item.fetch('fieldId')}"
           )
         end
+      end
+
+      # O que mudou, em uma expressão: "Backlog → Review" ou o nome de quem
+      # foi atribuído como reviewer. O changelog traz os dois como string
+      # (o Reviewer chega como "[Fulano]").
+      def resumo_da_mudanca(item)
+        destino = item["toString"].to_s.delete_prefix("[").delete_suffix("]").presence
+        origem = item["fromString"].to_s.delete_prefix("[").delete_suffix("]").presence
+        return destino.to_s if origem.nil? || destino.nil?
+
+        "#{origem} → #{destino}"
+      end
+
+      def resumo_do_issue(issue)
+        issue.fetch("fields", {}).fetch("summary", "")
+      end
+
+      # Linhas de contexto do card: tipo + épico + componente, e a primeira
+      # frase da descrição (que traz o "Contexto" escrito por quem abriu).
+      def contexto_do_issue(issue)
+        campos = issue.fetch("fields", {})
+        linhas = []
+        linhas << [ campos.dig("issuetype", "name"), nome_do_epico(campos),
+                    Array(campos["components"]).map { |c| c["name"] }.join(", ").presence ]
+                  .compact.reject(&:empty?).join(" · ").presence
+        linhas << primeira_frase(campos["description"]).presence
+        linhas.compact
+      end
+
+      # O épico costuma ter nome longo ("[Motor][Wave2] Pagamento com até 3
+      # cartões - Fluxo de captura e gestão do ciclo de vida") e se repete em
+      # toda entrega do dia — corta para o Brag continuar escaneável.
+      def nome_do_epico(campos)
+        resumir(campos.dig("parent", "fields", "summary"), EPICO_MAX_CHARS)
+      end
+
+      def resumir(texto, limite)
+        texto = texto.to_s.squish
+        return if texto.blank?
+
+        texto.length > limite ? "#{texto[0, limite - 1].rstrip}…" : texto
+      end
+
+      # A descrição vem em ADF (árvore de nós); concatena o texto e corta na
+      # primeira frase, limitado a RESUME_MAX_CHARS para não inflar o Brag.
+      def primeira_frase(adf)
+        texto = texto_do_adf(adf)
+        return if texto.blank?
+
+        frase = texto.split(/(?<=[.!?])\s+/).first.to_s
+        frase.length > RESUME_MAX_CHARS ? "#{frase[0, RESUME_MAX_CHARS - 1]}…" : frase
+      end
+
+      # Concatena o texto do ADF separando por parágrafo: os blocos de topo
+      # (ex.: o heading "Contexto") não podem colar na frase seguinte.
+      def texto_do_adf(no)
+        case no
+        when Hash
+          if no["type"] == "text"
+            no["text"].to_s
+          else
+            Array(no["content"]).map { |filho| texto_do_adf(filho) }.reject(&:blank?).join(" ")
+          end
+        when Array
+          no.map { |filho| texto_do_adf(filho) }.reject(&:blank?).join(" ")
+        end.to_s.squish
       end
 
       # Status (card movido) e o campo Reviewer (customfield, quando

@@ -28,12 +28,15 @@ RSpec.describe Tracking::Repositories::GitHubDeliveryRepository do
       allow(client).to receive(:authenticated_user).and_return({ "login" => "andremedeiros" })
       allow(client).to receive(:search_prs).and_return([ pr(id: 1, title: "Minha PR") ], [])
       allow(client).to receive(:search_commits).and_return([])
+      allow(client).to receive(:pull_request).and_return(
+        { "changed_files" => 17, "additions" => 1226, "deletions" => 55, "base" => { "ref" => "main" } }
+      )
 
       entregas = repository.entregas_do_dia(dia)
 
       expect(entregas.size).to eq(1)
       expect(entregas.first).to have_attributes(
-        source: :github, kind: :pr_aberto, external_id: "1",
+        source: :github, kind: :pr_aberto, external_id: "1", detail: "17 arquivos, +1226/−55",
         url: "https://github.com/org/repo/pull/7"
       )
     end
@@ -50,7 +53,23 @@ RSpec.describe Tracking::Repositories::GitHubDeliveryRepository do
       entregas = repository.entregas_do_dia(dia)
 
       expect(entregas.size).to eq(1)
-      expect(entregas.first).to have_attributes(kind: :review, external_id: "r1", title: "Review: PR do colega")
+      expect(entregas.first).to have_attributes(kind: :review, external_id: "r1", title: "PR do colega", detail: "Aprovado")
+    end
+
+    it "mantém uma review por PR e escolhe a mais representativa do dia" do
+      allow(client).to receive(:authenticated_user).and_return({ "login" => "andremedeiros" })
+      allow(client).to receive(:search_prs).and_return([], [ pr(id: 2, title: "PR do colega") ])
+      allow(client).to receive(:search_commits).and_return([])
+      allow(client).to receive(:pull_reviews).and_return([
+        review(id: "c1", login: "andremedeiros", submitted_at: "2026-10-14T10:00:00Z", state: "COMMENTED"),
+        review(id: "c2", login: "andremedeiros", submitted_at: "2026-10-14T11:00:00Z", state: "COMMENTED"),
+        review(id: "a1", login: "andremedeiros", submitted_at: "2026-10-14T12:00:00Z", state: "APPROVED")
+      ])
+
+      entregas = repository.entregas_do_dia(dia)
+
+      expect(entregas.size).to eq(1)
+      expect(entregas.first).to have_attributes(external_id: "a1", detail: "Aprovado")
     end
 
     it "exclui review pendente e de outro dia" do
@@ -74,7 +93,7 @@ RSpec.describe Tracking::Repositories::GitHubDeliveryRepository do
 
       expect(entregas.size).to eq(1)
       expect(entregas.first).to have_attributes(
-        kind: :commit, external_id: "abc123", title: "Commit: repo — fix: algo"
+        kind: :commit, external_id: "abc123", title: "fix: algo"
       )
     end
 
@@ -82,6 +101,7 @@ RSpec.describe Tracking::Repositories::GitHubDeliveryRepository do
       allow(client).to receive(:authenticated_user).and_return({ "login" => "andremedeiros" })
       allow(client).to receive(:search_prs).and_return([ pr(id: 1, title: "Minha PR") ], [])
       allow(client).to receive(:search_commits).and_return([])
+      allow(client).to receive(:pull_request).and_return({ "changed_files" => 3, "additions" => 10, "deletions" => 2 })
 
       entregas = repository.entregas_do_dia(dia)
 

@@ -6,6 +6,9 @@ module Tracking
     # blocks existentes (fonte do dedup) e appenda header do dia + bullets
     # com link clicável (decisão #12).
     class BragDocumentRepository
+      # Teto de children por chamada da API do Notion.
+      LOTE_DE_BLOCKS = 100
+
       def initialize(client: Tracker::Notion::Client.from_env,
                      page_id: ENV.fetch("TRACER_NOTION_BRAG_PAGE_ID"))
         @client = client
@@ -28,10 +31,17 @@ module Tracking
       def append(day, entregas)
         return if entregas.empty?
 
+        # Cada entrega rende 1 bullet + até 3 sub-bullets; a API do Notion
+        # aceita no máximo 100 children por chamada, então vai em lotes. O
+        # header sempre cabe no primeiro lote (cada lote tem ao menos 1 item,
+        # e o primeiro é o header quando falta).
         children = []
         children << header_do_dia(day) unless header_existe?(day)
-        children.concat(entregas.map { |entrega| bullet_da(entrega) })
-        @client.append_block_children(@page_id, children)
+        children.concat(entregas.flat_map { |entrega| blocos_da(entrega) })
+
+        children.each_slice(LOTE_DE_BLOCKS) do |lote|
+          @client.append_block_children(@page_id, lote)
+        end
       end
 
       private
@@ -66,17 +76,44 @@ module Tracking
         }
       end
 
+      # Bloco da entrega + seus sub-bullets de contexto, aninhados sob ela
+      # (children no próprio bullet: no Notion aparecem indentados e
+      # recolhíveis, sem ocupar uma linha a mais quando o dia tem muitas).
+      def blocos_da(entrega)
+        [ bullet_da(entrega) ].tap do |blocos|
+          blocos.first[:bulleted_list_item][:children] = sub_bullets_da(entrega)
+        end
+      end
+
       def bullet_da(entrega)
         {
           object: "block",
           type: "bulleted_list_item",
-          bulleted_list_item: {
-            rich_text: [
-              { type: "text", text: { content: "#{rotulo_da(entrega)} [#{entrega.external_id}] " } },
-              { type: "text", text: { content: entrega.title.sub(/\A[^:]+:\s*/, ""), link: { url: entrega.url } } }
-            ]
-          }
+          bulleted_list_item: { rich_text: texto_do_bullet(entrega) }
         }
+      end
+
+      # "[Jira] Movido [id] In Progress → Review " + título com link.
+      # O detail (o que mudou) fica em negrito, antes do título.
+      def texto_do_bullet(entrega)
+        textos = [ { type: "text", text: { content: "#{rotulo_da(entrega)} [#{entrega.external_id}] " } } ]
+        if entrega.detail.present?
+          textos << { type: "text", text: { content: "#{entrega.detail} " },
+                      annotations: { bold: true } }
+        end
+        textos << { type: "text", text: { content: entrega.title, link: { url: entrega.url } } }
+      end
+
+      def sub_bullets_da(entrega)
+        Array(entrega.context).reject(&:blank?).map do |linha|
+          {
+            object: "block",
+            type: "bulleted_list_item",
+            bulleted_list_item: {
+              rich_text: [ { type: "text", text: { content: linha } } ]
+            }
+          }
+        end
       end
 
       # Formato do bullet (decisão #12): fonte clicável + descrição.

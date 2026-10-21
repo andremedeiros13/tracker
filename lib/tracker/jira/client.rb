@@ -40,12 +40,13 @@ module Tracker
       # com o default de 50.
       BUSCA_MAX_ISSUES = 5000
 
-      # Busca por JQL (v3) — paginado por nextPageToken.
-      def search(jql)
+      # Busca por JQL (v3) — paginado por nextPageToken. `fields` escolhe o que
+      # vem de cada issue: sem ele o Jira devolve só id/self.
+      def search(jql, fields: "key,summary")
         issues = []
         token = nil
         loop do
-          query = { jql:, maxResults: BUSCA_MAX_ISSUES, fields: "key,summary" }
+          query = { jql:, maxResults: BUSCA_MAX_ISSUES, fields: }
           query[:nextPageToken] = token if token
           body = request(:Get, "/rest/api/3/search/jql", query:)
           issues.concat(body.fetch("issues"))

@@ -47,6 +47,13 @@ module Tracker
                 query: { per_page: 100 })
       end
 
+      # Detalhe do PR. A busca (/search/issues) não devolve changed_files,
+      # additions nem base — só este endpoint devolve, então o adapter faz um
+      # request por PR do dia (poucos).
+      def pull_request(owner, repo, pull_number)
+        request(:Get, "/repos/#{owner}/#{repo}/pulls/#{pull_number}")
+      end
+
       private
 
       def self.token_do_gh
