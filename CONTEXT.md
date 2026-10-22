@@ -4,6 +4,8 @@ Ferramenta interna para engenheiros de software: rastreamento de entregas diári
 histórico de 1-on-1 via transcrições, e To-Dos com **notificações nativas do S.O.**
 para quebrar o estado de hiperfoco.
 
+Termos que atravessam domínios e vocabulário de arquitetura: [GLOSSARY.md](GLOSSARY.md).
+
 ## Domínios (bounded contexts)
 
 - **Todos** — painel de To-Do e ciclo de notificação. Glossário:

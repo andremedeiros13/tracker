@@ -34,6 +34,9 @@ escrevendo nas pages do Database.
   propriedades contra o schema esperado no boot e falha cedo se divergir.
 - O `TodoRepository` preserva a interface (mesmos métodos para os use cases); o
   **adapter** troca de ActiveRecord para o cliente Notion — os use cases e seus testes
-  (via fake in-memory) sobrevivem intactos.
+  (via fake in-memory) sobrevivem intactos. *(Atualização: hoje o adapter é
+  `Todos::Repositories::TodoDatabase`, um módulo só para o database — leitura e
+  escrita derivam do mesmo `NotionSchema`. A interface dos use cases continua
+  pequena: `notification_candidates` e `create`.)*
 - Os domínios futuros (Tracking, OneOnOnes) também **escrevem tudo no Notion**
   (`Origem: Via Jira` / `Via transcrição`), nunca no banco local.
