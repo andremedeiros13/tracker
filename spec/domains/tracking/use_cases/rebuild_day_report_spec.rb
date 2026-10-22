@@ -16,9 +16,10 @@ RSpec.describe Tracking::UseCases::RebuildDayReport do
       "epic" => nil, "description" => nil }
   end
   let(:changelog) do
-    { "id-1" => [ { "id" => "c1", "author" => "acc-eu",
-                    "created" => (Time.zone.parse("#{dia} 10:00").to_f * 1000).to_i,
-                    "items" => [ { "fieldId" => "status", "fromString" => "To Do", "toString" => "In Progress" } ] } ] }
+    { "CHEKOUT-1" => [ Tracking::Entities::Activity.new(
+      kind: :changelog, author_id: "acc-eu", at: Time.zone.parse("#{dia} 10:00"),
+      status_items: [ { from: "To Do", to: "In Progress" } ]
+    ) ] }
   end
 
   def use_case(**opts)
@@ -33,7 +34,7 @@ RSpec.describe Tracking::UseCases::RebuildDayReport do
       "TRACER_NOTION_BRAG_PAGE_ID" => "page-brag"
     ))
     allow(jira).to receive(:dia).and_return(
-      Tracking::Entities::JiraDay.new(cards: [ card ], changelogs: changelog)
+      Tracking::Entities::JiraDay.new(cards: [ card ], activities: changelog)
     )
     allow(github).to receive(:dia).and_return(Tracking::Entities::GitHubDay.new)
     allow(brag).to receive(:rebuild).and_return(:reescrito)

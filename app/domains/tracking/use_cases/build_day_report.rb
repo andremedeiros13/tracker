@@ -74,19 +74,16 @@ module Tracking
       # O card entra no dia se eu movi o status, comentei, ou ele é meu e teve
       # atividade hoje.
       def participou?(card, jira, day)
-        movi = entradas_minhas(card, jira).any? { |entrada| no_dia?(entrada, day) }
-        comentei = Array(jira.comments[card["key"]]).any? { |c| c[:author_id] == @account_id }
+        atividades = jira.activities_for(card["key"])
+        movi = atividades.any? { |a| a.changelog? && a.mine?(@account_id) && a.touches_status? && a.no_dia?(day) }
+        comentei = atividades.any? { |a| a.comment? && a.mine?(@account_id) }
         movi || comentei
       end
 
       def entradas_minhas(card, jira)
-        Array(jira.changelogs[card["id"]]).select do |entrada|
-          autor(entrada) == @account_id && entrada.fetch("items").any? { |i| i["fieldId"] == "status" }
+        jira.activities_for(card["key"]).select do |atividade|
+          atividade.changelog? && atividade.mine?(@account_id) && atividade.touches_status?
         end
-      end
-
-      def autor(entrada)
-        entrada["author"].respond_to?(:fetch) ? entrada["author"]["accountId"] : entrada["author"]
       end
 
       def item_do_card(card, jira, day, por_key)
@@ -128,23 +125,17 @@ module Tracking
 
       def transicoes_do_dia(card, jira, day)
         entradas_minhas(card, jira)
-          .select { |entrada| no_dia?(entrada, day) }
-          .flat_map { |entrada| entrada.fetch("items").select { |i| i["fieldId"] == "status" } }
-          .filter_map { |item| [ limpar(item["fromString"]), limpar(item["toString"]) ] if item["fromString"] && item["toString"] }
-      end
-
-      def limpar(valor)
-        valor.to_s.delete_prefix("[").delete_suffix("]").presence
+          .select { |atividade| atividade.no_dia?(day) }
+          .flat_map(&:status_pairs)
       end
 
       def ultima_atividade(card, jira, day)
-        entradas = entradas_minhas(card, jira).map { |e| criado_em(e) } +
-                  Array(jira.comments[card["key"]]).map { |c| c[:created_at] }
-        entradas.map(&:to_date).count(day).positive? ? entradas.max : nil
+        instantes = jira.activities_for(card["key"]).select { |a| a.no_dia?(day) }.map(&:at)
+        instantes.max
       end
 
       def comentarios_meus(card, jira)
-        Array(jira.comments[card["key"]]).count { |c| c[:author_id] == @account_id }
+        jira.activities_for(card["key"]).count { |a| a.comment? && a.mine?(@account_id) }
       end
 
       # PR cujo card não entrou no dia (ou sem card): item próprio, para o
@@ -186,15 +177,6 @@ module Tracking
           itens.select { |i| grupo.include?(i.outcome) }
                .sort_by { |i| -(i.outcome_at || i.last_activity_at || Time.zone.at(0)).to_i }
         end
-      end
-
-      def no_dia?(entrada, day)
-        criado_em(entrada).to_date == day
-      end
-
-      def criado_em(entrada)
-        created = entrada.fetch("created").to_s
-        created.match?(/\A\d+\z/) ? Time.zone.at(created.to_i / 1000.0) : Time.zone.parse(created)
       end
     end
   end

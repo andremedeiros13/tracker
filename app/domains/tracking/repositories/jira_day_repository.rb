@@ -2,9 +2,13 @@
 
 module Tracking
   module Repositories
-    # Adapter Jira: traz os cards em que eu participei no dia + o changelog
-    # deles + os comentários meus do dia. Cru (Entities::JiraDay) — a regra de
-    # "o que conta como entrega" é do BuildDayReport.
+    # Adapter Jira: traz os cards em que eu participei no dia + as atividades
+    # (changelog normalizado + comentários) deles. Cru (Entities::JiraDay) — a
+    # regra de "o que conta como entrega" é do BuildDayReport.
+    #
+    # O changelog do bulkfetch chega com duas anomalias em relação ao changelog
+    # individual (created em epoch ms, author como accountId). Elas morrem aqui:
+    # o domínio só vê Entities::Activity com autor e instante já resolvidos.
     #
     # Filtro `estreito` (default): só cards com a minha participação, ~0,5 s.
     # Filtro `largo`: tudo que mudou na janela — 3.400 issues e ~60 s por ciclo,
@@ -35,8 +39,7 @@ module Tracking
         changelogs = @client.changelog_em_lote(cards.map { |card| card.fetch("id") })
         Entities::JiraDay.new(
           cards: cards.map { |card| normalizar(card) },
-          changelogs: changelogs,
-          comments: comentarios_do_dia(cards, day)
+          activities: atividades_do_dia(cards, changelogs)
         )
       end
 
@@ -79,18 +82,61 @@ module Tracking
         }
       end
 
-      # { "KEY" => [ { author_id:, created_at: }, ... ] } — só os comentários
-      # do dia, com o autor resolvido (o BuildDayReport conta os meus).
-      def comentarios_do_dia(cards, day)
+      # { "KEY" => [Activity, ...] } — changelog e comentários do dia já
+      # unificados: o domínio pergunta "o que aconteceu neste card hoje",
+      # não "de onde veio cada entrada".
+      def atividades_do_dia(cards, changelogs)
         cards.each_with_object({}) do |card, acc|
-          comentarios = Array(card.dig("fields", "comment", "comments")).filter_map do |comentario|
-            quando = Time.zone.parse(comentario.fetch("created").to_s)
-            next unless quando.to_date == day
-
-            { author_id: comentario.dig("author", "accountId"), created_at: quando }
-          end
-          acc[card.fetch("key")] = comentarios unless comentarios.empty?
+          atividades = atividades_do_changelog(changelogs[card.fetch("id")]) +
+                       atividades_dos_comentarios(card)
+          acc[card.fetch("key")] = atividades.sort_by(&:at) unless atividades.empty?
         end
+      end
+
+      def atividades_do_changelog(entradas)
+        Array(entradas).map do |entrada|
+          Entities::Activity.new(
+            kind: :changelog,
+            author_id: autor_da(entrada),
+            at: instante_de(entrada.fetch("created")),
+            status_items: itens_de_status(entrada)
+          )
+        end
+      end
+
+      def atividades_dos_comentarios(card)
+        Array(card.dig("fields", "comment", "comments")).map do |comentario|
+          Entities::Activity.new(
+            kind: :comment,
+            author_id: comentario.dig("author", "accountId"),
+            at: instante_de(comentario.fetch("created"))
+          )
+        end
+      end
+
+      # O bulkfetch devolve o author como accountId; o changelog individual
+      # como {accountId:}. Aceitar os dois aqui é o que tira o shim do domínio.
+      def autor_da(entrada)
+        author = entrada["author"]
+        author.respond_to?(:fetch) ? author["accountId"] : author
+      end
+
+      # idem para `created`: epoch ms no bulkfetch, ISO 8601 no individual.
+      def instante_de(valor)
+        texto = valor.to_s
+        texto.match?(/\A\d+\z/) ? Time.zone.at(texto.to_i / 1000.0) : Time.zone.parse(texto)
+      end
+
+      def itens_de_status(entrada)
+        Array(entrada.fetch("items")).filter_map do |item|
+          next unless item["fieldId"] == "status"
+
+          { from: limpar(item["fromString"]), to: limpar(item["toString"]) }
+        end
+      end
+
+      def limpar(valor)
+        valor.to_s.delete_prefix("[").delete_suffix("]").presence
       end
 
       def url_do_card(key)

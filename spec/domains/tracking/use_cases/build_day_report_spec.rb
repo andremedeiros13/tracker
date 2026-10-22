@@ -20,17 +20,23 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
     }
   end
 
-  # Shape do bulkfetch: author = accountId, created = epoch ms.
+  # Shape que o adapter entrega: atividade já normalizada (sem epoch ms nem
+  # author cru — isso é responsabilidade do JiraDayRepository).
   def transicao(de:, para:, hora: "10:00", author: account_id, id: "c1")
-    {
-      "id" => id, "author" => author,
-      "created" => (Time.zone.parse("#{dia} #{hora}") .to_f * 1000).to_i,
-      "items" => [ { "fieldId" => "status", "fromString" => de, "toString" => para } ]
-    }
+    Tracking::Entities::Activity.new(
+      kind: :changelog, author_id: author, at: Time.zone.parse("#{dia} #{hora}"),
+      status_items: [ { from: de, to: para } ]
+    )
   end
 
-  def jira_day(cards:, changelogs: {}, comments: {})
-    Tracking::Entities::JiraDay.new(cards: cards, changelogs: changelogs, comments: comments)
+  def comentario(author: account_id, hora: "16:46")
+    Tracking::Entities::Activity.new(
+      kind: :comment, author_id: author, at: Time.zone.parse("#{dia} #{hora}")
+    )
+  end
+
+  def jira_day(cards:, activities: {})
+    Tracking::Entities::JiraDay.new(cards: cards, activities: activities)
   end
 
   def pr(number: 1, title: "CHEKOUT-2301 captura", body: "# Problema\n\nNada grava.\n\n# Solução\n\nGrava.",
@@ -54,10 +60,10 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
   describe "#call" do
     it "liga o PR ao card pela key e usa o corpo do PR como contexto" do
       card = card(key: "CHEKOUT-2301")
-      changelog = { "id-CHEKOUT-2301" => [ transicao(de: "To Do", para: "In Progress") ] }
+      changelog = { "CHEKOUT-2301" => [ transicao(de: "To Do", para: "In Progress") ] }
       pr_ = pr(title: "CHEKOUT-2301 [Payments] Captura", merged_at: "#{dia} 16:48", approvals: [ "Marivaldo" ])
 
-      report = use_case.call(dia, jira: jira_day(cards: [ card ], changelogs: changelog),
+      report = use_case.call(dia, jira: jira_day(cards: [ card ], activities: changelog),
                                   github: github_day(pull_requests: [ pr_ ]))
 
       item = report.work_items.first
@@ -71,37 +77,51 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
 
     it "card de outro que eu só movi vira :moved (não é minha entrega)" do
       card = card(key: "CHEKOUT-2332", assignee_id: "acc-itallo", assignee: "Itallo")
-      changelog = { "id-CHEKOUT-2332" => [ transicao(de: "Review", para: "Ready for Deploy") ] }
+      changelog = { "CHEKOUT-2332" => [ transicao(de: "Review", para: "Ready for Deploy") ] }
 
-      item = use_case.call(dia, jira: jira_day(cards: [ card ], changelogs: changelog)).work_items.first
+      item = use_case.call(dia, jira: jira_day(cards: [ card ], activities: changelog)).work_items.first
 
       expect(item).to have_attributes(outcome: :moved, mine: false, owner_name: "Itallo")
     end
 
     it "higiene de board (Prioritized → To Do) não vira item" do
       card = card(key: "CHEKOUT-9")
-      changelog = { "id-CHEKOUT-9" => [ transicao(de: "Prioritized", para: "To Do", id: "c9") ] }
+      changelog = { "CHEKOUT-9" => [ transicao(de: "Prioritized", para: "To Do", id: "c9") ] }
 
-      report = use_case.call(dia, jira: jira_day(cards: [ card ], changelogs: changelog))
+      report = use_case.call(dia, jira: jira_day(cards: [ card ], activities: changelog))
 
       expect(report.work_items).to be_empty
     end
 
     it "card sem transição minha hoje e sem comentário meu não entra" do
       card = card(key: "CHEKOUT-8")
-      changelog = { "id-CHEKOUT-8" => [ transicao(de: "To Do", para: "In Progress", hora: "10:00", author: "acc-outro") ] }
+      changelog = { "CHEKOUT-8" => [ transicao(de: "To Do", para: "In Progress", hora: "10:00", author: "acc-outro") ] }
 
-      expect(use_case.call(dia, jira: jira_day(cards: [ card ], changelogs: changelog)).work_items).to be_empty
+      expect(use_case.call(dia, jira: jira_day(cards: [ card ], activities: changelog)).work_items).to be_empty
     end
 
     it "conta os comentários meus do dia no card" do
       card = card(key: "CHEKOUT-7")
-      comentarios = { "CHEKOUT-7" => [ { author_id: account_id, created_at: Time.zone.parse("#{dia} 16:46") } ] }
+      comentarios = { "CHEKOUT-7" => [ comentario ] }
 
-      item = use_case.call(dia, jira: jira_day(cards: [ card ], comments: comentarios)).work_items.first
+      item = use_case.call(dia, jira: jira_day(cards: [ card ], activities: comentarios)).work_items.first
 
       expect(item.comments_count).to eq(1)
       expect(item.status_chain).to be_empty
+    end
+
+    it "changelog de campo que não é status não conta como comentário" do
+      card = card(key: "CHEKOUT-6")
+      mudanca_de_descricao = {
+        "CHEKOUT-6" => [
+          Tracking::Entities::Activity.new(
+            kind: :changelog, author_id: account_id, at: Time.zone.parse("#{dia} 11:00")
+          )
+        ]
+      }
+
+      expect(use_case.call(dia, jira: jira_day(cards: [ card ], activities: mudanca_de_descricao)).work_items)
+        .to be_empty
     end
 
     it "PR sem card vira item próprio" do
@@ -112,10 +132,10 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
 
     it "aceita card cujo PR foi aberto noutro dia e mergeado hoje" do
       card = card(key: "CHEKOUT-2298")
-      changelog = { "id-CHEKOUT-2298" => [ transicao(de: "Review", para: "Done") ] }
+      changelog = { "CHEKOUT-2298" => [ transicao(de: "Review", para: "Done") ] }
       pr_ = pr(title: "CHEKOUT-2298 outbox", merged_at: "#{dia} 14:29", created_at: "2026-10-20 17:38")
 
-      item = use_case.call(dia, jira: jira_day(cards: [ card ], changelogs: changelog),
+      item = use_case.call(dia, jira: jira_day(cards: [ card ], activities: changelog),
                                 github: github_day(pull_requests: [ pr_ ])).work_items.first
 
       expect(item.outcome).to eq(:merged)
@@ -124,22 +144,22 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
     it "usa o épico no header só quando todos os cards compartilham" do
       cards = [ card(key: "CHEKOUT-1"), card(key: "CHEKOUT-2") ]
       changelog = {
-        "id-CHEKOUT-1" => [ transicao(de: "To Do", para: "In Progress", id: "c1") ],
-        "id-CHEKOUT-2" => [ transicao(de: "To Do", para: "In Progress", id: "c2") ]
+        "CHEKOUT-1" => [ transicao(de: "To Do", para: "In Progress", id: "c1") ],
+        "CHEKOUT-2" => [ transicao(de: "To Do", para: "In Progress", id: "c2") ]
       }
 
-      report = use_case.call(dia, jira: jira_day(cards: cards, changelogs: changelog))
+      report = use_case.call(dia, jira: jira_day(cards: cards, activities: changelog))
       expect(report.epic_note).to eq("[Motor][Wave2] Pagamento")
     end
 
     it "sem épico comum quando os cards são de frentes diferentes" do
       cards = [ card(key: "CHEKOUT-1", epic: "Épico A"), card(key: "CHEKOUT-2", epic: "Épico B") ]
       changelog = {
-        "id-CHEKOUT-1" => [ transicao(de: "To Do", para: "In Progress", id: "c1") ],
-        "id-CHEKOUT-2" => [ transicao(de: "To Do", para: "In Progress", id: "c2") ]
+        "CHEKOUT-1" => [ transicao(de: "To Do", para: "In Progress", id: "c1") ],
+        "CHEKOUT-2" => [ transicao(de: "To Do", para: "In Progress", id: "c2") ]
       }
 
-      expect(use_case.call(dia, jira: jira_day(cards: cards, changelogs: changelog)).epic_note).to be_nil
+      expect(use_case.call(dia, jira: jira_day(cards: cards, activities: changelog)).epic_note).to be_nil
     end
 
     it "ordena: concluídos, em andamento, cards de outros" do
@@ -150,13 +170,13 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
         card(key: "CHEKOUT-4", status: "Concluído", category: "done")
       ]
       changelog = {
-        "id-CHEKOUT-1" => [ transicao(de: "Review", para: "Deploy", id: "c1") ],
-        "id-CHEKOUT-2" => [ transicao(de: "To Do", para: "In Progress", id: "c2", hora: "09:00") ],
-        "id-CHEKOUT-3" => [ transicao(de: "To Do", para: "In Progress", id: "c3", hora: "15:00") ],
-        "id-CHEKOUT-4" => [ transicao(de: "Review", para: "Done", id: "c4") ]
+        "CHEKOUT-1" => [ transicao(de: "Review", para: "Deploy", id: "c1") ],
+        "CHEKOUT-2" => [ transicao(de: "To Do", para: "In Progress", id: "c2", hora: "09:00") ],
+        "CHEKOUT-3" => [ transicao(de: "To Do", para: "In Progress", id: "c3", hora: "15:00") ],
+        "CHEKOUT-4" => [ transicao(de: "Review", para: "Done", id: "c4") ]
       }
 
-      referencia = use_case.call(dia, jira: jira_day(cards: cards, changelogs: changelog)).work_items.map(&:referencia)
+      referencia = use_case.call(dia, jira: jira_day(cards: cards, activities: changelog)).work_items.map(&:referencia)
 
       expect(referencia).to eq([ "#4", "#3", "#2", "#1" ])
     end
