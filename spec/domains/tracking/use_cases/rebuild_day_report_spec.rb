@@ -7,7 +7,7 @@ RSpec.describe Tracking::UseCases::RebuildDayReport do
   let(:logger) { instance_double(ActiveSupport::Logger, info: nil, error: nil) }
   let(:jira) { instance_double(Tracking::Repositories::JiraDayRepository) }
   let(:github) { instance_double(Tracking::Repositories::GitHubDayRepository) }
-  let(:brag) { instance_double(Tracking::Repositories::BragDocumentRepository) }
+  let(:brag) { instance_double(Tracking::BragDocument) }
   let(:stdout) { StringIO.new }
   let(:card) do
     { "id" => "id-1", "key" => "CHEKOUT-1", "title" => "card", "url" => "u",
@@ -15,7 +15,7 @@ RSpec.describe Tracking::UseCases::RebuildDayReport do
       "assignee" => "André", "assignee_id" => "acc-eu", "reporter" => "R",
       "epic" => nil, "description" => nil }
   end
-  let(:changelog) do
+  let(:activities) do
     { "CHEKOUT-1" => [ Tracking::Entities::Activity.new(
       kind: :changelog, author_id: "acc-eu", at: Time.zone.parse("#{dia} 10:00"),
       status_items: [ { from: "To Do", to: "In Progress" } ]
@@ -23,44 +23,42 @@ RSpec.describe Tracking::UseCases::RebuildDayReport do
   end
 
   def use_case(**opts)
-    described_class.new(jira: jira, github: github, brag: brag, logger: logger, stdout: stdout, **opts)
+    described_class.new(jira:, github:, brag:, logger:, stdout:, **opts)
   end
 
   before do
-    # O use case monta BuildDayReport/ledger sem injeção quando não os recebe;
-    # ambos leem ENV (no app real vem do .env).
-    stub_const("ENV", ENV.to_h.merge(
-      "JIRA_ACCOUNT_ID" => "acc-eu",
-      "TRACER_NOTION_BRAG_PAGE_ID" => "page-brag"
-    ))
+    # BuildDayReport lê o account do ENV quando não recebe (no app real vem do .env).
+    stub_const("ENV", ENV.to_h.merge("JIRA_ACCOUNT_ID" => "acc-eu"))
     allow(jira).to receive(:dia).and_return(
-      Tracking::Entities::JiraDay.new(cards: [ card ], activities: changelog)
+      Tracking::Entities::JiraDay.new(cards: [ card ], activities:)
     )
     allow(github).to receive(:dia).and_return(Tracking::Entities::GitHubDay.new)
-    allow(brag).to receive(:rebuild).and_return(:reescrito)
+    allow(brag).to receive(:rewrite).and_return(:reescrito)
   end
 
   describe "#call" do
-    it "reescreve a seção do dia no Brag (caminho normal escreve)" do
+    it "manda o BragDocument reescrever a seção do dia" do
       expect(use_case.call(dia)).to eq(1)
-      expect(brag).to have_received(:rebuild).with(dia, hash_including(:header, :sentinel, :blocos))
+      expect(brag).to have_received(:rewrite).with(dia, an_instance_of(Tracking::Entities::DayReport))
+    end
+
+    it "quando o conteúdo não mudou, não conta como dia atualizado" do
+      allow(brag).to receive(:rewrite).and_return(:sem_mudanca)
+
+      expect(use_case.call(dia)).to eq(0)
     end
 
     it "com dry_run não toca no Notion e imprime" do
       expect(use_case(dry_run: true).call(dia)).to eq(0)
 
-      expect(brag).not_to have_received(:rebuild)
+      expect(brag).not_to have_received(:rewrite)
       expect(stdout.string).to include("#1 · card")
     end
 
-    it "dia sem atividade e sem ledger não cria seção vazia" do
-      allow(jira).to receive(:dia).and_return(Tracking::Entities::JiraDay.new)
-      ledger = instance_double(Tracker::Brag::BlockLedger, day: nil)
-      uc = described_class.new(jira: jira, github: github, brag: brag, logger: logger,
-                               stdout: stdout, ledger: ledger, dry_run: false)
+    it "dry_run imprime o header do dia com o formato do renderer" do
+      use_case(dry_run: true).call(dia)
 
-      expect(uc.call(dia)).to eq(0)
-      expect(brag).not_to have_received(:rebuild)
+      expect(stdout.string).to include("## 21/10/2026 — quarta")
     end
 
     it "falha do Jira não impede o registro do GitHub" do
@@ -77,41 +75,23 @@ RSpec.describe Tracking::UseCases::RebuildDayReport do
 
       expect(use_case.call(dia)).to eq(1)
       expect(logger).to have_received(:error).with(a_string_including("jira"))
-      expect(brag).to have_received(:rebuild)
-    end
-
-    it "sem Jira e sem GitHub configurados ainda monta o relatório do dia" do
-      allow(jira).to receive(:dia).and_return(Tracking::Entities::JiraDay.new)
-      allow(github).to receive(:dia).and_return(Tracking::Entities::GitHubDay.new)
-      ledger = instance_double(Tracker::Brag::BlockLedger, day: { blocks: [] })
-      uc = described_class.new(jira: jira, github: github, brag: brag, logger: logger,
-                               stdout: stdout, ledger: ledger, dry_run: false)
-
-      expect(uc.call(dia)).to eq(1)
+      expect(brag).to have_received(:rewrite)
     end
 
     it "reconstrói ontem antes do meio-dia e só hoje depois" do
-      agora = Time.zone.local(2026, 10, 21, 10, 0)
-      # O dia de ontem já tem seção no ledger: é o que autoriza reescrevê-la
-      # mesmo que a coleta de ontem venha vazia.
-      ledger = instance_double(Tracker::Brag::BlockLedger, day: { blocks: [] })
-      uc = described_class.new(jira: jira, github: github, brag: brag, logger: logger,
-                               stdout: stdout, ledger: ledger)
+      allow(brag).to receive(:rewrite).and_return(:sem_mudanca)
 
-      uc.call(agora)
-      expect(brag).to have_received(:rebuild).with(Date.new(2026, 10, 20), anything)
-      expect(brag).to have_received(:rebuild).with(Date.new(2026, 10, 21), anything)
+      use_case.call(Time.zone.local(2026, 10, 21, 10, 0))
+
+      expect(brag).to have_received(:rewrite).with(Date.new(2026, 10, 20), anything)
+      expect(brag).to have_received(:rewrite).with(Date.new(2026, 10, 21), anything)
     end
 
     it "depois do meio-dia reconstrói só hoje" do
-      ledger = instance_double(Tracker::Brag::BlockLedger, day: { blocks: [] })
-      uc = described_class.new(jira: jira, github: github, brag: brag, logger: logger,
-                               stdout: stdout, ledger: ledger)
+      use_case.call(Time.zone.local(2026, 10, 21, 15, 0))
 
-      uc.call(Time.zone.local(2026, 10, 21, 15, 0))
-
-      expect(brag).to have_received(:rebuild).once
-      expect(brag).to have_received(:rebuild).with(Date.new(2026, 10, 21), anything)
+      expect(brag).to have_received(:rewrite).once
+      expect(brag).to have_received(:rewrite).with(Date.new(2026, 10, 21), anything)
     end
   end
 end

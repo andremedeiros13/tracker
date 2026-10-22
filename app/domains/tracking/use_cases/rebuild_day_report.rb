@@ -2,8 +2,10 @@
 
 module Tracking
   module UseCases
-    # O ciclo do Tracking: coleta o dia (Jira + GitHub), agrega, renderiza e
-    # reescreve a seção do Brag document.
+    # O ciclo do Tracking: coleta o dia (Jira + GitHub), agrega e manda o
+    # BragDocument reescrever a seção. Coleta e agregação são as
+    # responsabilidades daqui; header, sentinel, ledger e escrita são do
+    # módulo da seção (Tracking::BragDocument).
     #
     # Reconstrução em vez de append: o dia só está completo quando acaba.
     # A coleta de cada fonte é resgatada em separado — Jira fora não pode
@@ -14,21 +16,20 @@ module Tracking
     class RebuildDayReport
       MEIO_DIA = 12
 
-      def initialize(jira: nil, github: nil, brag: nil, renderer: Renderers::BragBlocks.new,
+      def initialize(jira: nil, github: nil, brag: nil,
                      logger: Rails.logger, dry_run: ENV["TRACER_DRY_RUN"] == "1",
                      filtro: ENV.fetch("TRACER_JIRA_FILTRO", "estreito"), stdout: $stdout,
-                     ledger: nil)
+                     renderer: Renderers::BragBlocks.new)
         @jira = jira
         @github = github
-        # nil = criar o adapter real. O caminho que NÃO escreve é dry_run: = 1
+        # nil = criar o módulo real. O caminho que NÃO escreve é dry_run: = 1
         # (rake tracking:preview e TRACER_DRY_RUN).
         @brag = brag
-        @ledger = ledger
-        @renderer = renderer
         @logger = logger
         @dry_run = dry_run
         @filtro = filtro
         @stdout = stdout
+        @renderer = renderer
       end
 
       def call(day = Date.current)
@@ -48,32 +49,19 @@ module Tracking
 
       def reconstruir(day)
         report = BuildDayReport.new.call(day, jira: coletar_jira(day), github: coletar_github(day))
-        blocos = report.vazio? ? [ @renderer.sem_atividade ] : @renderer.items(report)
         if @dry_run
-          imprimir(day, report, blocos)
+          imprimir(day, report)
           return 0
         end
-        # Dia vazio sem ledger: não cria seção vazia para um dia que nunca teve
-        # atividade (só o header ficaria, poluindo o documento).
-        return 0 if report.vazio? && ledger.day(day).nil?
 
-        resultado = brag.rebuild(
-          day,
-          header: @renderer.header(day, report.epic_note),
-          sentinel: @renderer.sentinel,
-          blocos: blocos
-        )
+        resultado = brag.rewrite(day, report)
         @logger.info("[tracking] #{day.iso8601}: #{resultado}")
         resultado == :reescrito ? 1 : 0
       end
 
-      # Adapter real, criado sob demanda (o dry_run não instancia Notion).
+      # Módulo real, criado sob demanda (o dry_run não instancia Notion).
       def brag
-        @brag ||= Repositories::BragDocumentRepository.new(ledger: ledger)
-      end
-
-      def ledger
-        @ledger ||= Tracker::Brag::BlockLedger.new(page_id: ENV.fetch("TRACER_NOTION_BRAG_PAGE_ID"))
+        @brag ||= Tracking::BragDocument.new(renderer: @renderer)
       end
 
       def coletar_jira(day)
@@ -91,10 +79,12 @@ module Tracking
       end
 
       # Preview em texto (usado pelo rake e pelo TRACER_DRY_RUN) — permite ler
-      # o resultado real antes de qualquer escrita no Notion.
-      def imprimir(day, report, blocos)
+      # o resultado real antes de qualquer escrita no Notion. Renderiza, não
+      # introspecta blocks: o mesmo caminho que escreveria.
+      def imprimir(day, report)
+        blocos = report.vazio? ? [ @renderer.sem_atividade ] : @renderer.items(report)
         @stdout.puts("== #{day.iso8601} ==")
-        @stdout.puts("## #{@renderer.header(day, report.epic_note)[:heading_2][:rich_text].map { |t| t[:text][:content] }.join}")
+        @stdout.puts("## #{texto_rich(@renderer.header(day, report.epic_note)[:heading_2])}")
         blocos.each do |bloco|
           tipo = bloco.fetch(:type).to_sym
           @stdout.puts("• #{texto_rich(bloco[tipo])}")

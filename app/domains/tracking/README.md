@@ -16,13 +16,21 @@ API de blocks — ADR 0001).
 - **Commits e PRs do GitHub**: `is:pr author:@me`, `is:pr reviewed-by:@me` + datas;
   reviews via `GET /repos/{owner}/{repo}/pulls/{n}/reviews` (filtro client-side por
   `user.login` — não existe endpoint "reviews by user")
-- **Use cases**: `CollectTodaysDeliveries` (o ciclo — agrega e appenda com dedup),
-  `DiscoverReviewer` (rake task), `CollectMovedIssues`/`CollectPullRequests`
-  (coletas dentro dos adapters)
-- **Append no Brag document**: incremental com dedup — cada ciclo coleta o dia e
-  appenda só entregas que ainda não estão (dedup por `external_id` embutido no
-  bullet); header por dia (`heading_2` com a data), bullets com link clicável
-  (decisão #12)
+- **Use cases**: `RebuildDayReport` (o ciclo — coleta, agrega e manda o Brag
+  reescrever), `BuildDayReport` (regra pura do dia), `DiscoverReviewer` (rake
+  task); `CollectMovedIssues`/`CollectPullRequests` (coletas dentro dos adapters)
+- **Módulo da seção**: `Tracking::BragDocument` — recebe o `DayReport` e cuida
+  de header, sentinel, ledger, lock e escrita. O chamador não monta bloco nem
+  consulta o ledger: a interface é `rewrite(day, report)` / `adopt(day)`
+- **Normalização no adapter**: `JiraDayRepository` entrega `Entities::Activity`
+  (autor, instante e itens de status já resolvidos). A diferença entre o
+  bulkfetch (epoch ms, author como accountId) e o changelog individual (ISO
+  8601, `{accountId:}`) morre ali — o domínio nunca vê
+- **Append no Brag document**: reconstrução com dedup — a cada ciclo a seção do
+  dia é reescrita inteira (o valor do dia só se conhece quando ele acaba);
+  header por dia (`heading_2` com a data), bullets com link clicável
+  (decisão #12). O ledger local guarda só os ids que geramos, para apagar o
+  nosso sem tocar no que foi escrito à mão
 
 ## Fontes de verdade
 

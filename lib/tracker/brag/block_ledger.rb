@@ -11,7 +11,7 @@ module Tracker
     # para apagar só o que é nosso — e nunca um parágrafo escrito à mão — o
     # daemon precisa lembrar os ids que criou. O Notion continua sendo a fonte
     # da verdade do documento; isto guarda só ids + assinaturas do que geramos
-    # (ADR 0002 — não é estado de domínio).
+    # (ADR 0002 — não é estado de domínio; ver docs/adr/0002-ledger-local-do-brag.md).
     #
     # Um dia é uma entrada: header (âncora cronológica, nunca apagado), o
     # sentinel (parágrafo que avisa que o trecho é gerado) e os blocks do dia,
