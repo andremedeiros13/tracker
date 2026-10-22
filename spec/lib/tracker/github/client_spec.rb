@@ -55,6 +55,18 @@ RSpec.describe Tracker::GitHub::Client do
     end
   end
 
+  describe "rate limit" do
+    it "honra 429 com Retry-After em vez de estourar (o cliente antes pulava o retry)" do
+      retry_after = instance_double(Net::HTTPClientError, code: "429", body: "{}", is_a?: false)
+      allow(retry_after).to receive(:[]).with("Retry-After").and_return("0")
+      http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:start).and_yield(http)
+      allow(http).to receive(:request).and_return(retry_after, http_success({ "items" => [] }))
+
+      expect(client.search_prs("is:pr author:me")).to eq([])
+    end
+  end
+
   describe ".from_env" do
     it "levanta erro claro sem GITHUB_TOKEN e sem gh CLI" do
       allow(described_class).to receive(:token_do_gh).and_return(nil)

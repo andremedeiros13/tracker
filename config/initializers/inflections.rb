@@ -16,6 +16,8 @@
 # end
 
 # Acrônimos do domínio — Tracker::GitHub (não Tracker::Github) e Tracker::Jira.
+# HTTP entra pelo mesmo motivo: lib/tracker/http.rb define Tracker::HTTP.
 ActiveSupport::Inflector.inflections(:en) do |inflect|
   inflect.acronym "GitHub"
+  inflect.acronym "HTTP"
 end

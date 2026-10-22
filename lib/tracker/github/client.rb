@@ -1,19 +1,12 @@
 # frozen_string_literal: true
 
-require "net/http"
-require "json"
-
 module Tracker
   module GitHub
-    # Cliente HTTP puro da API do GitHub (pesquisa #4 — sem gem de terceiro
-    # no seam). Token do ENV ou do gh CLI já autenticado; a superfície usada:
-    # busca de PRs/commits, reviews de PR, user autenticado.
+    # Cliente HTTP da API do GitHub (pesquisa #4 — sem gem de terceiro no
+    # seam). Token do ENV ou do gh CLI já autenticado; a superfície usada:
+    # busca de PRs/commits, reviews de PR, user autenticado. Timeouts, retry de
+    # 429 e mapeamento de erro ficam no transporte comum (Tracker::HTTP).
     class Client
-      # Sem timeout, um socket pendurado trava o ciclo inteiro do daemon (o
-      # tracking ficou 199s num ciclo que normalmente leva 8s). 10s para abrir
-      # e 30s para ler cobre com folga o payload do bulkfetch do Jira.
-      TIMEOUT_ABERTURA = 10
-      TIMEOUT_LEITURA = 30
       BASE = "https://api.github.com"
 
       def initialize(token:)
@@ -69,18 +62,14 @@ module Tracker
       end
 
       def request(method, path, body: nil, query: nil)
-        uri = URI("#{BASE}#{path}")
-        uri.query = URI.encode_www_form(query) if query&.any?
-        req = Net::HTTP.const_get(method).new(uri)
-        req["Authorization"] = "Bearer #{@token}"
-        req["Accept"] = "application/vnd.github+json"
-        req["Content-Type"] = "application/json"
-        req.body = JSON.generate(body) if body
-
-        resposta = Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: TIMEOUT_ABERTURA, read_timeout: TIMEOUT_LEITURA) { |http| http.request(req) }
-        raise ApiError.new(resposta.code, resposta.body) unless resposta.is_a?(Net::HTTPSuccess)
-
-        JSON.parse(resposta.body)
+        Tracker::HTTP.call(
+          method:, url: "#{BASE}#{path}", query:, body:,
+          headers: {
+            "Authorization" => "Bearer #{@token}",
+            "Accept" => "application/vnd.github+json"
+          },
+          error: ApiError
+        )
       end
     end
   end

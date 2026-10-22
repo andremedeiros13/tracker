@@ -1,19 +1,12 @@
 # frozen_string_literal: true
 
-require "net/http"
-require "json"
-
 module Tracker
   module Notion
-    # Cliente HTTP puro do Notion (ADR 0001 — sem gem de terceiro no seam).
+    # Cliente HTTP do Notion (ADR 0001 — sem gem de terceiro no seam).
     # A superfície usada é pequena: GET database, POST query, POST pages,
-    # POST/GET blocks, (PATCH page).
+    # POST/GET blocks, (PATCH page). Timeouts, retry de 429 e mapeamento de
+    # erro ficam no transporte comum (Tracker::HTTP).
     class Client
-      # Sem timeout, um socket pendurado trava o ciclo inteiro do daemon (o
-      # tracking ficou 199s num ciclo que normalmente leva 8s). 10s para abrir
-      # e 30s para ler cobre com folga o payload do bulkfetch do Jira.
-      TIMEOUT_ABERTURA = 10
-      TIMEOUT_LEITURA = 30
       BASE = "https://api.notion.com/v1"
       VERSION = "2022-06-28"
 
@@ -95,31 +88,11 @@ module Tracker
       private
 
       def request(method, path, body: nil, query: nil)
-        uri = URI("#{BASE}#{path}")
-        uri.query = URI.encode_www_form(query) if query&.any?
-        req = Net::HTTP.const_get(method).new(uri)
-        req["Authorization"] = "Bearer #{@token}"
-        req["Notion-Version"] = VERSION
-        req["Content-Type"] = "application/json"
-        req.body = JSON.generate(body) if body
-
-        resposta = com_retry_429 { Net::HTTP.start(uri.host, uri.port, use_ssl: true, open_timeout: TIMEOUT_ABERTURA, read_timeout: TIMEOUT_LEITURA) { |http| http.request(req) } }
-        raise ApiError.new(resposta.code, resposta.body) unless resposta.is_a?(Net::HTTPSuccess)
-
-        JSON.parse(resposta.body)
-      end
-
-      # Honra Retry-After no 429 (rate limit — API Free: 180 req/min).
-      def com_retry_429(max_tentativas: 2)
-        tentativas = 0
-        loop do
-          resposta = yield
-          return resposta unless resposta.code == "429"
-          raise ApiError.new(resposta.code, resposta.body) if tentativas >= max_tentativas
-
-          sleep(resposta["Retry-After"]&.to_f || 1.0)
-          tentativas += 1
-        end
+        Tracker::HTTP.call(
+          method:, url: "#{BASE}#{path}", query:, body:,
+          headers: { "Authorization" => "Bearer #{@token}", "Notion-Version" => VERSION },
+          error: ApiError
+        )
       end
     end
   end
