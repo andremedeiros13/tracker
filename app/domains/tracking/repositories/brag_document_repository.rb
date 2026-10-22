@@ -13,6 +13,11 @@ module Tracking
     # só os ids que nós criamos. Um bloco escrito à mão na seção não está no
     # ledger e nunca é tocado. Sem ledger confiável, cai no fallback por
     # convenção — que só assume posse quando o sentinel está lá.
+    #
+    # A leitura da seção (achar header/sentinel, blocos abaixo do sentinel)
+    # vem de Tracker::Notion::PageDays — o formato da data e a varredura da
+    # page são os mesmos do 1-on-1. Só a escrita é local: este repositório pode
+    # apagar o que o ledger conhece; o do 1-on-1 nunca apaga.
     class BragDocumentRepository
       # Teto de children por chamada da API do Notion.
       LOTE_DE_BLOCKS = 100
@@ -20,11 +25,13 @@ module Tracking
       def initialize(client: Tracker::Notion::Client.from_env,
                      page_id: ENV.fetch("TRACER_NOTION_BRAG_PAGE_ID"),
                      ledger: nil,
-                     logger: Rails.logger)
+                     logger: Rails.logger,
+                     page_days: nil)
         @client = client
         @page_id = page_id
         @ledger = ledger || Tracker::Brag::BlockLedger.new(page_id: page_id)
         @logger = logger
+        @page_days = page_days || Tracker::Notion::PageDays.new(client:, page_id:)
       end
 
       # Reescreve a seção do dia.
@@ -63,16 +70,7 @@ module Tracking
       # pela migração única (AdoptBragSection) — o rebuild normal não varre a
       # página quando o ledger está em dia.
       def blocos_do_dia(day)
-        marcador = Renderers::BragBlocks.data_do_dia(day)
-        dentro = false
-        @client.block_children(@page_id).select do |block|
-          if block.fetch("type") == "heading_2"
-            dentro = texto_do(block).start_with?(marcador)
-            dentro
-          else
-            dentro
-          end
-        end
+        @page_days.section(day)
       end
 
       private
@@ -84,32 +82,12 @@ module Tracking
       def adotar_sem_ledger(day, estado, header_id, sentinel_id)
         return if estado
 
-        ids = blocos_abaixo_do_sentinel(day, sentinel_id)
+        ids = @page_days.ids_after(day, sentinel_id)
         return if ids.empty?
 
         @logger.warn("[tracking] ledger ausente para #{day.iso8601}: adotando #{ids.size} block(s) da seção")
         @ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
                             blocks: ids.map { |id| { id: id } })
-      end
-
-      # Ids dos blocks gerados no dia: depois do sentinel, até o próximo header.
-      def blocos_abaixo_do_sentinel(day, sentinel_id)
-        marcador = Renderers::BragBlocks.data_do_dia(day)
-        dentro = false
-        viu_sentinel = false
-        ids = []
-        @client.block_children(@page_id).each do |block|
-          texto = texto_do(block)
-          if block.fetch("type") == "heading_2"
-            break if viu_sentinel
-            dentro = texto.start_with?(marcador)
-          elsif dentro && block.fetch("id") == sentinel_id
-            viu_sentinel = true
-          elsif viu_sentinel
-            ids << block.fetch("id")
-          end
-        end
-        ids
       end
 
       # Liga id criado → assinatura do bloco que o originou. `zip` (não
@@ -129,10 +107,7 @@ module Tracking
       # Ano + data do header, procurado no documento — usado quando o ledger
       # sumiu mas o header (criado por nós antes) continua na page.
       def achar_header(day)
-        marcador = Renderers::BragBlocks.data_do_dia(day)
-        @client.block_children(@page_id).find do |block|
-          block.fetch("type") == "heading_2" && texto_do(block).start_with?(marcador)
-        end&.fetch("id")
+        @page_days.section(day).find { |block| @page_days.header?(block) }&.fetch("id")
       end
 
       def criar(bloco, after: nil)
@@ -142,10 +117,10 @@ module Tracking
       # Sentinels já criados por tentativas anteriores (o ledger pode não ter o
       # id se uma escrita falhou no meio). Sem isso, cada ciclo falho deixava
       # mais um parágrafo "gerado pelo Tracker" na página.
-      def achar_sentinel(header_id)
-        @client.block_children(@page_id)
-               .select { |b| b.fetch("type") == "paragraph" && texto_do(b).include?(Renderers::BragBlocks::SENTINEL) }
-               .first&.fetch("id")
+      def achar_sentinel(_header_id)
+        @page_days.blocks
+                  .select { |b| @page_days.block?(b, "paragraph") && @page_days.text(b).include?(Renderers::BragBlocks::SENTINEL) }
+                  .first&.fetch("id")
       end
 
       # Apaga só o que está no ledger. `delete_block` trata 404 como sucesso
@@ -171,10 +146,6 @@ module Tracking
           after = novos.last
         end
         ids
-      end
-
-      def texto_do(block)
-        block.fetch(block.fetch("type")).fetch("rich_text").map { |t| t.fetch("plain_text") }.join
       end
     end
   end

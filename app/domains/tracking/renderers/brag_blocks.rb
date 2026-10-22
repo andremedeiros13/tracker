@@ -42,9 +42,10 @@ module Tracking
       # 3 cartões"). O nome completo está em cada card, se precisar.
       EPICO_MAX = 60
 
-      # Data do header ("21/10/2026") — o repositório usa para achar a seção do
-      # dia quando o ledger não está disponível.
-      def self.data_do_dia(day) = day.to_date.strftime("%d/%m/%Y")
+      # Data do header ("21/10/2026") — formato único, compartilhado com o
+      # leitor de seções (Tracker::Notion::PageDays), que usa o mesmo marcador
+      # para achar a seção do dia quando o ledger não está disponível.
+      def self.data_do_dia(day) = Tracker::Notion::PageDays.marker(day)
 
       def header(day, epic_note)
         texto = "#{self.class.data_do_dia(day)} — #{DIAS[day.to_date.wday]}"

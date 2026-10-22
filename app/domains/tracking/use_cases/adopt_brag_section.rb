@@ -35,6 +35,8 @@ module Tracking
 
       private
 
+      # Um bloco por linha: tipo + texto. O leitor quer o conteúdo antigo
+      # legível para colar em outro lugar se precisar.
       def backup(day, blocos)
         dir = Rails.root.join("storage/tracking")
         FileUtils.mkdir_p(dir)

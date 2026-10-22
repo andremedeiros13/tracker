@@ -3,13 +3,16 @@
 module OneOnOnes
   module Repositories
     # Adapter Notion da page 1-on-1 (page, não database — ADR 0001): appenda
-    # header do dia + título da reunião + resumo + action items. Mesmo padrão
-    # do BragDocumentRepository (append + header por dia).
+    # header do dia + título da reunião + resumo + action items. A leitura da
+    # seção do dia vem de Tracker::Notion::PageDays (mesma varredura do Brag);
+    # a escrita é própria — este repositório nunca apaga, o Brag sim.
     class MeetingRepository
       def initialize(client: Tracker::Notion::Client.from_env,
-                     page_id: ENV.fetch("TRACER_NOTION_ONE_ON_ONES_PAGE_ID"))
+                     page_id: ENV.fetch("TRACER_NOTION_ONE_ON_ONES_PAGE_ID"),
+                     page_days: nil)
         @client = client
         @page_id = page_id
+        @page_days = page_days || Tracker::Notion::PageDays.new(client:, page_id:)
       end
 
       # Appenda a reunião no histórico: header do dia (se ainda não existe),
@@ -27,9 +30,7 @@ module OneOnOnes
       private
 
       def header_existe?(date)
-        @client.block_children(@page_id).any? do |block|
-          block.fetch("type") == "heading_2" && texto_do(block) == data_do_dia(date)
-        end
+        @page_days.header_exists?(date)
       end
 
       def header_do_dia(date)
@@ -73,11 +74,7 @@ module OneOnOnes
       end
 
       def data_do_dia(date)
-        date.strftime("%d/%m/%Y")
-      end
-
-      def texto_do(block)
-        block.fetch(block.fetch("type")).fetch("rich_text").map { |t| t.fetch("plain_text") }.join
+        Tracker::Notion::PageDays.marker(date)
       end
     end
   end
