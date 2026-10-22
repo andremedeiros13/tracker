@@ -5,7 +5,7 @@ require "rails_helper"
 RSpec.describe OneOnOnes::UseCases::ImportTranscription do
   let(:dir) { Dir.mktmpdir }
   let(:meetings) { instance_double(OneOnOnes::Repositories::MeetingRepository) }
-  let(:todos) { instance_double(OneOnOnes::Repositories::TodoCreationRepository) }
+  let(:todos) { instance_double(Todos::Repositories::TodoDatabase) }
   let(:logger) { instance_double(ActiveSupport::Logger, error: nil, debug: nil) }
   let(:me) { "André" }
   let(:use_case) do
@@ -21,7 +21,7 @@ RSpec.describe OneOnOnes::UseCases::ImportTranscription do
 
   before do
     allow(meetings).to receive(:append)
-    allow(todos).to receive(:create_todo)
+    allow(todos).to receive(:create)
   end
 
   after { FileUtils.remove_entry(dir) }
@@ -42,12 +42,20 @@ RSpec.describe OneOnOnes::UseCases::ImportTranscription do
       soltar_transcricao
 
       titulos = []
-      allow(todos).to receive(:create_todo) { |titulo| titulos << titulo }
+      allow(todos).to receive(:create) { |titulo| titulos << titulo }
       use_case.call
 
-      expect(todos).to have_received(:create_todo).exactly(7).times
+      expect(todos).to have_received(:create).exactly(7).times
       expect(titulos).to all(start_with("André Medeiros:"))
       expect(titulos).not_to include(start_with("Rodolfo Spalenza:"))
+    end
+
+    it "cria os To-Dos com origem via_transcricao (label vem do schema)" do
+      soltar_transcricao
+
+      use_case.call
+
+      expect(todos).to have_received(:create).with(anything, origin: :via_transcricao).exactly(7).times
     end
 
     it "move o arquivo para importados/ (nunca re-importa)" do
@@ -66,7 +74,7 @@ RSpec.describe OneOnOnes::UseCases::ImportTranscription do
       use_case.call
 
       expect(meetings).to have_received(:append).once
-      expect(todos).to have_received(:create_todo).exactly(7).times
+      expect(todos).to have_received(:create).exactly(7).times
     end
 
     it "não cria To-Do quando o nome do usuário não está configurado" do
@@ -76,7 +84,7 @@ RSpec.describe OneOnOnes::UseCases::ImportTranscription do
 
       use_case_sem_me.call
 
-      expect(todos).not_to have_received(:create_todo)
+      expect(todos).not_to have_received(:create)
       expect(meetings).to have_received(:append).once
     end
 

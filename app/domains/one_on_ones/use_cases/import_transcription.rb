@@ -16,7 +16,7 @@ module OneOnOnes
       def initialize(dir: ENV["TRACER_ONE_ON_ONES_DIR"] || DEFAULT_DIR,
                      parser: ParseTranscription.new,
                      meetings: Repositories::MeetingRepository.new,
-                     todos: Repositories::TodoCreationRepository.new,
+                     todos: Todos::Repositories::TodoDatabase.new,
                      logger: Rails.logger,
                      me: ENV["TRACER_ONE_ON_ONES_ME"])
         @dir = dir
@@ -47,7 +47,7 @@ module OneOnOnes
         @meetings.append(resultado[:meetings].first, action_items)
 
         criados = action_items.select(&:mine?)
-        criados.each { |item| @todos.create_todo("#{item.owner}: #{item.description}") }
+        criados.each { |item| @todos.create("#{item.owner}: #{item.description}", origin: :via_transcricao) }
         mover(arquivo)
         criados.size
       rescue Tracker::Error, Tracker::Notion::Error, KeyError => e

@@ -5,12 +5,12 @@ require "rails_helper"
 RSpec.describe Todos::UseCases::NotifyPendingTodos do
   let(:notifier) { instance_double(Tracker::NativeNotifier) }
 
-  # Fake in-memory do repository — mesma interface do adapter Notion.
+  # Fake in-memory do database — mesma interface do adapter Notion.
   let(:fake_repository) do
     Class.new do
       def initialize(todos) = @todos = todos
 
-      def notificaveis_agora
+      def notification_candidates
         @todos.select(&:lembrete_ativo?)
               .sort_by { |t| t.snoozed_until || t.created_at }
       end
@@ -31,7 +31,7 @@ RSpec.describe Todos::UseCases::NotifyPendingTodos do
         todo(titulo: "b", origem: :via_jira),
         todo(titulo: "c", origem: :manual)
       ]
-      use_case = described_class.new(repository: fake_repository.new(pendencias), notifier: notifier)
+      use_case = described_class.new(database: fake_repository.new(pendencias), notifier: notifier)
 
       expect(notifier).to receive(:notify)
         .with("Tracker", "3 pendências: via Jira (2), manual")
@@ -45,7 +45,7 @@ RSpec.describe Todos::UseCases::NotifyPendingTodos do
         todo(titulo: "concluida", status: :concluida),
         todo(titulo: "snoozed", status: :snoozed, snoozed_until: 1.hour.from_now)
       ]
-      use_case = described_class.new(repository: fake_repository.new(sem_pendencias), notifier: notifier)
+      use_case = described_class.new(database: fake_repository.new(sem_pendencias), notifier: notifier)
 
       expect(notifier).not_to receive(:notify)
       expect(use_case.call).to be_nil
@@ -53,7 +53,7 @@ RSpec.describe Todos::UseCases::NotifyPendingTodos do
 
     it "snoozed vencido entra no ciclo" do
       pendencias = [ todo(titulo: "a", snoozed_until: 1.minute.ago, status: :snoozed) ]
-      use_case = described_class.new(repository: fake_repository.new(pendencias), notifier: notifier)
+      use_case = described_class.new(database: fake_repository.new(pendencias), notifier: notifier)
 
       expect(notifier).to receive(:notify).with("Tracker", "1 pendência: manual")
       use_case.call
