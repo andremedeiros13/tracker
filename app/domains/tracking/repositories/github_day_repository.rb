@@ -29,9 +29,9 @@ module Tracking
 
       PESO_DA_REVIEW = { "APPROVED" => 3, "CHANGES_REQUESTED" => 2, "COMMENTED" => 1, "DISMISSED" => 0 }.freeze
 
-      def initialize(client: Tracker::GitHub::Client.from_env,
-                     org: ENV.fetch("GITHUB_ORG", "ResultadosDigitais"),
-                     username: ENV["GITHUB_USERNAME"])
+      def initialize(client: nil,
+                     org: nil,
+                     username: nil)
         @client = client
         @org = org
         @username = username
@@ -50,22 +50,28 @@ module Tracking
 
       private
 
+      # Resolvidos sob demanda: o seam não pode exigir as variáveis do adapter
+      # real quando o teste injeta um fake.
+      def client = @client ||= Tracker::GitHub::Client.from_env
+
+      def org = @org ||= ENV.fetch("GITHUB_ORG", "ResultadosDigitais")
+
       def username
-        @username ||= @client.authenticated_user.fetch("login")
+        @username ||= ENV["GITHUB_USERNAME"] || client.authenticated_user.fetch("login")
       end
 
       # União das duas buscas, cortada pelo dia no fuso local.
       def meus_prs(nome, day)
         desde = day - 1
         consultas = [ "created:>=#{desde}", "merged:>=#{desde}" ]
-        unicos = consultas.flat_map { |q| @client.search_prs("is:pr author:#{nome} #{q}") }
+        unicos = consultas.flat_map { |q| client.search_prs("is:pr author:#{nome} #{q}") }
                           .uniq { |pr| pr.fetch("number") }
         unicos
       end
 
       def detalhe_do_pr(pr)
         owner, repo = repositorio_do(pr)
-        @client.pull_request(owner, repo, pr.fetch("number"))
+        client.pull_request(owner, repo, pr.fetch("number"))
       rescue Tracker::Error => e
         Rails.logger.warn("[tracking] github: detalhe do PR ##{pr['number']}: #{e.class}: #{e.message}")
         {}
@@ -100,7 +106,7 @@ module Tracking
 
       def reviews_do_pr(pr)
         owner, repo = repositorio_do(pr)
-        @client.pull_reviews(owner, repo, pr.fetch("number"))
+        client.pull_reviews(owner, repo, pr.fetch("number"))
       rescue Tracker::Error => e
         Rails.logger.warn("[tracking] github: reviews do PR ##{pr['number']}: #{e.class}: #{e.message}")
         []
@@ -114,7 +120,7 @@ module Tracking
       # várias COMMENTED seguidas) — fica a mais representativa.
       def reviews_dadas(nome, day, meus)
         meus_numeros = meus.map { |pr| pr.fetch("number") }
-        @client.search_prs("is:pr reviewed-by:#{nome} updated:>=#{day - 1}").filter_map do |pr|
+        client.search_prs("is:pr reviewed-by:#{nome} updated:>=#{day - 1}").filter_map do |pr|
           next if meus_numeros.include?(pr.fetch("number"))
 
           review = review_do_dia(pr, nome, day)
@@ -133,7 +139,7 @@ module Tracking
 
       def review_do_dia(pr, nome, day)
         owner, repo = repositorio_do(pr)
-        @client.pull_reviews(owner, repo, pr.fetch("number"))
+        client.pull_reviews(owner, repo, pr.fetch("number"))
                .select { |r| r.dig("user", "login") == nome && r["state"] != "PENDING" && no_dia?(r["submitted_at"], day) }
                .max_by { |r| PESO_DA_REVIEW.fetch(r["state"], 0) }
       rescue Tracker::Error
@@ -147,7 +153,7 @@ module Tracking
       # Ler a raiz estourava KeyError "date" e derrubava a coleta inteira do
       # GitHub — o dia saía sem os commits E sem os PRs.
       def commits(nome, day, prs)
-        @client.search_commits("author:#{nome} org:#{@org} committer-date:>=#{day - 1}").filter_map do |commit|
+        client.search_commits("author:#{nome} org:#{org} committer-date:>=#{day - 1}").filter_map do |commit|
           quando = Time.zone.parse(commit.dig("commit", "committer", "date").to_s)
           next unless quando
 

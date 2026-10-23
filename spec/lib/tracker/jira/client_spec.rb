@@ -112,28 +112,4 @@ RSpec.describe Tracker::Jira::Client do
       expect(req.path).to include("query=Reviewer")
     end
   end
-
-  describe ".configurado?" do
-    it "é falso sem credenciais" do
-      with_env(JIRA_EMAIL: nil, JIRA_API_TOKEN: nil) do
-        expect(described_class.configurado?).to be_falsey
-      end
-    end
-
-    it "é verdadeiro com credenciais" do
-      with_env(JIRA_EMAIL: "me@example.com", JIRA_API_TOKEN: "tok") do
-        expect(described_class.configurado?).to be_truthy
-      end
-    end
-  end
-
-  private
-
-  def with_env(vars)
-    anteriores = vars.to_h { |k, v| [ k.to_s, ENV[k.to_s] ] }
-    vars.each { |k, v| ENV[k.to_s] = v }
-    yield
-  ensure
-    anteriores.each { |k, v| ENV[k] = v }
-  end
 end

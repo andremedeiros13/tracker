@@ -24,10 +24,10 @@ module Tracking
       # 80 KB para 6 cards medidos em 2026-10-21).
       CAMPOS = "key,summary,status,assignee,reporter,parent,issuetype,components,description,comment"
 
-      def initialize(client: Tracker::Jira::Client.from_env,
-                     site: ENV.fetch("JIRA_SITE", "https://rdstation.atlassian.net"),
-                     account_id: ENV.fetch("JIRA_ACCOUNT_ID"),
-                     reviewer_field_id: ENV["JIRA_REVIEWER_FIELD_ID"],
+      def initialize(client: nil,
+                     site: nil,
+                     account_id: nil,
+                     reviewer_field_id: nil,
                      filtro: ENV.fetch("TRACER_JIRA_FILTRO", "estreito"))
         @client = client
         @site = site
@@ -36,11 +36,18 @@ module Tracking
         @filtro = filtro
       end
 
+      # Resolvidos sob demanda: o seam só vale se injetar o adapter não exigir
+      # as variáveis do adapter real.
+      def client = @client ||= Tracker::Jira::Client.from_env
+      def site = @site ||= ENV.fetch("JIRA_SITE", "https://rdstation.atlassian.net")
+      def account_id = @account_id ||= ENV.fetch("JIRA_ACCOUNT_ID")
+      def reviewer_field_id = @reviewer_field_id ||= ENV["JIRA_REVIEWER_FIELD_ID"]
+
       def dia(day)
-        cards = @client.search(jql_da_janela, fields: CAMPOS)
+        cards = client.search(jql_da_janela, fields: CAMPOS)
         return Entities::JiraDay.new if cards.empty?
 
-        changelogs = @client.changelog_em_lote(cards.map { |card| card.fetch("id") })
+        changelogs = client.changelog_em_lote(cards.map { |card| card.fetch("id") })
         Entities::JiraDay.new(
           cards: cards.map { |card| normalizar(card) },
           activities: atividades_do_dia(cards, changelogs)
@@ -64,7 +71,7 @@ module Tracking
 
       # JQL não aceita o id cru do custom field: cf[customfield_10125] dá 400.
       def id_numerico_do_reviewer
-        @reviewer_field_id.to_s[/\d+\z/].presence
+        reviewer_field_id.to_s[/\d+\z/].presence
       end
 
       # Payload do Jira → Entities::Card. `mine` sai daqui resolvido: o domínio
@@ -78,7 +85,7 @@ module Tracking
           title: campos["summary"].to_s,
           status: campos.dig("status", "name").to_s,
           status_category: campos.dig("status", "statusCategory", "key").to_s,
-          mine: assignee_id == @account_id,
+          mine: assignee_id == account_id,
           assignee_name: campos.dig("assignee", "displayName"),
           reporter_name: campos.dig("reporter", "displayName"),
           epic: campos.dig("parent", "fields", "summary"),
@@ -102,7 +109,7 @@ module Tracking
         Array(entradas).map do |entrada|
           Entities::Activity.new(
             kind: :changelog,
-            mine: autor_da(entrada) == @account_id,
+            mine: autor_da(entrada) == account_id,
             at: instante_de(entrada.fetch("created")),
             status_items: itens_de_status(entrada)
           )
@@ -113,7 +120,7 @@ module Tracking
         Array(card.dig("fields", "comment", "comments")).map do |comentario|
           Entities::Activity.new(
             kind: :comment,
-            mine: comentario.dig("author", "accountId") == @account_id,
+            mine: comentario.dig("author", "accountId") == account_id,
             at: instante_de(comentario.fetch("created"))
           )
         end
@@ -145,7 +152,7 @@ module Tracking
       end
 
       def url_do_card(key)
-        URI.join(@site, "browse/#{key}").to_s
+        URI.join(site, "browse/#{key}").to_s
       end
     end
   end

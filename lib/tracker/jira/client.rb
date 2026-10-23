@@ -26,10 +26,6 @@ module Tracker
             site: ENV.fetch("JIRA_SITE", "https://rdstation.atlassian.net"))
       end
 
-      def self.configurado?
-        ENV["JIRA_EMAIL"] && ENV["JIRA_API_TOKEN"]
-      end
-
       # Tamanho de página da busca. A API aceita 5000: uma janela de 2 dias
       # (~3.500 issues) vem em 1 request de ~1,4s, contra 70 requests e ~34s
       # com o default de 50.
