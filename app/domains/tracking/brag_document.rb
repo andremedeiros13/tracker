@@ -104,8 +104,7 @@ module Tracking
     end
 
     # Apaga da página todos os blocks que o ledger conhece, de qualquer dia.
-    # Usado pela migração que rearranja uma página fora de ordem
-    # (RepairBragOrder): a posse é a mesma, então quem sabe apagar é este
+    # Base do `repair_order`: a posse é a mesma, então quem sabe apagar é este
     # módulo — o chamador não repete o laço nem o resgate de erro.
     def forget(days)
       ledger.with_lock do
@@ -117,6 +116,49 @@ module Tracking
       days.size
     end
 
+    # Conserta a página que ficou fora de ordem (Bug de 22–23/10/2026: o
+    # conteúdo de um dia novo caía dentro da seção do dia anterior, numa
+    # página crescente).
+    #
+    # Mora aqui, e não num use case, porque é a mesma posse que o `rewrite`
+    # usa: o lock, o backup, o "só apaga o que é nosso" e o resgate de erro
+    # por bloco já vivem neste módulo. O chamador (rake) não recombina
+    # PageDays + BragDocument + Backup + RebuildDayReport.
+    #
+    # DESTRUTIVA: dry-run por default; `apply: true` apaga, faz backup em
+    # storage/tracking/ e reconstrói do mais novo para o mais antigo (a
+    # primeira seção entra no topo e cada seguinte logo depois da anterior, o
+    # que produz a ordem decrescente).
+    #
+    # Devolve a lista de dias que seriam/foram reconstruídos.
+    #
+    # `rebuild` é injetável: o caminho de produção coleta o dia (rede) e
+    # reescreve; o teste passa um lambda e não toca em Jira nem GitHub. Sem
+    # isso, testar a migração exigiria rede.
+    def repair_order(days: nil, apply: false, rebuild: nil)
+      secoes = page_days.sections
+      alvos = (days || secoes.map(&:day).compact).sort.reverse
+
+      if alvos.empty?
+        @stdout.puts("Nenhuma seção de dia no Brag — nada a reparar.")
+        return []
+      end
+
+      imprimir_plano(secoes, alvos, apply:)
+      return alvos unless apply
+
+      secoes.each do |secao|
+        caminho = Tracker::Brag::Backup.section(secao.day, secao.blocks, suffix: "-antes-do-repair")
+        @stdout.puts("Backup: #{caminho}")
+      end
+      forget(alvos)
+
+      reconstruir = rebuild || ->(dia) { UseCases::RebuildDayReport.new(brag: self).call(dia) }
+      alvos.each { |dia| reconstruir.call(dia) }
+      @stdout.puts("Reparado: #{alvos.map { |d| Renderers::BragBlocks.data_do_dia(d) }.join(', ')}.")
+      alvos
+    end
+
     private
 
     def client = @client ||= Tracker::Notion::Client.from_env
@@ -126,6 +168,17 @@ module Tracking
     def ledger = @ledger ||= Tracker::Brag::BlockLedger.new(page_id:)
 
     def page_days = @page_days ||= Tracker::Notion::PageDays.new(client:, page_id:)
+
+    # O plano da migração é o que o engenheiro lê antes de aplicar — ordem
+    # atual vs. pretendida. Sem ele, `repair_order` seria destrutivo e mudo.
+    def imprimir_plano(secoes, alvos, apply:)
+      @stdout.puts("== Brag: ordem atual ==")
+      secoes.each { |secao| @stdout.puts("  #{Renderers::BragBlocks.data_do_dia(secao.day)}") }
+      @stdout.puts("== Ordem pretendida (decrescente) ==")
+      alvos.each { |dia| @stdout.puts("  #{Renderers::BragBlocks.data_do_dia(dia)}") }
+      @stdout.puts("Dias a esquecer e reconstruir: #{alvos.size}")
+      @stdout.puts("(dry-run — rode com APPLY=1 para aplicar)") unless apply
+    end
 
     # Caminho de escrita: com a página lida uma única vez, decide os ids da
     # seção (header, sentinel), apaga o que é nosso e escreve de novo.

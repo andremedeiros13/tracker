@@ -5,7 +5,8 @@ module Tracker
     # Dump em texto de uma seção do Brag, antes de uma operação destrutiva.
     #
     # Existe porque havia duas cópias da mesma conversão (bloco → "tipo: texto")
-    # no rewrite/adopt e no RepairBragOrder. `PageDays.text_of` já era única;
+    # no rewrite/adopt e na migração de ordem (`BragDocument#repair_order`).
+    # `PageDays.text_of` já era única;
     # o formato do dump não era — e os dois backups precisam ser legíveis e
     # iguais para quem for comparar o antes e o depois.
     #

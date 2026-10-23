@@ -17,12 +17,12 @@ namespace :tracking do
   desc "Adota a seção antiga do dia (backup em storage/ + sentinel + ledger)"
   task :adopt, [ :date ] => :environment do |_, args|
     dia = args[:date] ? Date.parse(args[:date]) : Date.current
-    Tracking::UseCases::AdoptBragSection.new.call(dia)
+    Tracking::BragDocument.new.adopt(dia)
   end
 
   desc "Conserta o Brag fora de ordem (dry-run; APPLY=1 aplica) — DESTRUTIVO"
   task repair_order: :environment do
-    Tracking::UseCases::RepairBragOrder.new.call
+    Tracking::BragDocument.new.repair_order(apply: ENV["APPLY"] == "1")
   end
 
   desc "Descobre o customfield 'Reviewer' no Jira (copie o id pro .env)"
