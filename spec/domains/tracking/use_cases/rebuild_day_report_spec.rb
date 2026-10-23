@@ -4,7 +4,7 @@ require "rails_helper"
 
 RSpec.describe Tracking::UseCases::RebuildDayReport do
   let(:dia) { Date.new(2026, 10, 21) }
-  let(:logger) { instance_double(ActiveSupport::Logger, info: nil, error: nil) }
+  let(:logger) { instance_double(ActiveSupport::Logger, info: nil, error: nil, warn: nil) }
   let(:jira) { instance_double(Tracking::Repositories::JiraDayRepository) }
   let(:github) { instance_double(Tracking::Repositories::GitHubDayRepository) }
   let(:brag) { instance_double(Tracking::BragDocument) }
@@ -59,21 +59,23 @@ RSpec.describe Tracking::UseCases::RebuildDayReport do
       expect(stdout.string).to include("## 21/10/2026 — quarta")
     end
 
-    it "falha do Jira não impede o registro do GitHub" do
+    # O bug que esta regra corrige: a falha virava dia vazio, o rewrite via a
+    # assinatura mudar e apagava do Brag os bullets do Jira. Melhor deixar o
+    # dia como estava do que gravar metade dele.
+    it "falha do Jira não reescreve o dia (não apaga a metade do Jira no Brag)" do
       allow(jira).to receive(:dia).and_raise(Tracker::Jira::ApiError.new("500", "fora"))
-      # Com Jira vazio mas GitHub com PR, ainda há o que escrever.
-      allow(github).to receive(:dia).and_return(
-        Tracking::Entities::GitHubDay.new(pull_requests: [
-          Tracking::Entities::PullRequest.new(
-            number: 42, title: "chore: sem ticket", url: "u", repo: "o/r",
-            created_at: Time.zone.parse("#{dia} 10:00")
-          )
-        ])
-      )
 
-      expect(use_case.call(dia)).to eq(1)
+      expect(use_case.call(dia)).to eq(0)
+      expect(brag).not_to have_received(:rewrite)
       expect(logger).to have_received(:error).with(a_string_including("jira"))
-      expect(brag).to have_received(:rewrite)
+      expect(logger).to have_received(:warn).with(a_string_including("coleta incompleta"))
+    end
+
+    it "falha do GitHub também segura o dia" do
+      allow(github).to receive(:dia).and_raise(Tracker::GitHub::ApiError.new("502", "fora"))
+
+      expect(use_case.call(dia)).to eq(0)
+      expect(brag).not_to have_received(:rewrite)
     end
 
     it "reconstrói ontem antes do meio-dia e só hoje depois" do
