@@ -6,7 +6,7 @@ RSpec.describe Tracker::Notion::SchemaValidator do
   let(:client) { instance_double(Tracker::Notion::Client) }
 
   def validator(expected = Todos::Repositories::NotionSchema::PROPERTIES)
-    described_class.new(client: client, expected: expected)
+    described_class.new(client: client, database_id: "db-1", expected: expected)
   end
 
   def database_props(properties)

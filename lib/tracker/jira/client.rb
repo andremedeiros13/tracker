@@ -30,10 +30,6 @@ module Tracker
         ENV["JIRA_EMAIL"] && ENV["JIRA_API_TOKEN"]
       end
 
-      def myself
-        request(:Get, "/rest/api/3/myself")
-      end
-
       # Tamanho de página da busca. A API aceita 5000: uma janela de 2 dias
       # (~3.500 issues) vem em 1 request de ~1,4s, contra 70 requests e ~34s
       # com o default de 50.
@@ -56,32 +52,16 @@ module Tracker
         issues
       end
 
-      # Changelog paginado do issue (isLast/nextPage, maxResults 100).
-      def changelog(issue_id_or_key)
-        entradas = []
-        token = nil
-        loop do
-          query = { maxResults: 100 }
-          query[:nextPage] = token if token
-          body = request(:Get, "/rest/api/3/issue/#{issue_id_or_key}/changelog", query:)
-          entradas.concat(body.fetch("values"))
-          break if body.fetch("isLast", true)
-
-          token = body.fetch("nextPage")
-        end
-        entradas
-      end
-
       # Teto de issues por request do bulkfetch (a API responde 400 acima).
       LOTE_MAX_ISSUES = 1000
 
       # Changelog de vários issues em lote — 1 request por 1000 issues em vez
       # de um request por issue (era o N+1 que travava o ciclo por minutos).
-      # Retorna { "<issueId>" => [histórias] }, com o MESMO shape do changelog
-      # individual, exceto:
-      #   - "created" vem em epoch ms (no individual vem em ISO 8601);
-      #   - "author" vem como accountId (no individual vem como {accountId:}).
-      # A normalização é do adapter (JiraDeliveryRepository).
+      # Retorna { "<issueId>" => [histórias] }, onde cada história tem:
+      #   - "created" em epoch ms (o endpoint individual devolve ISO 8601);
+      #   - "author" como accountId (o individual devolve {accountId:}).
+      # A normalização é do adapter (JiraDayRepository) — o domínio nunca vê
+      # nem a diferença nem o formato.
       #
       # maxResults é um orçamento de histórias por página; o resto vem por
       # nextPageToken. 5000 mede ~10,6s por lote de 1000 issues, contra 16,7s

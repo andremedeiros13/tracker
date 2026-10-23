@@ -7,8 +7,24 @@ RSpec.describe Tracker::Scheduler do
   let(:agora) { Time.zone.local(2026, 10, 21, 10, 0) }
 
   def job(nome: :x, intervalo: 30, janela: nil, once_per_day: false, &bloco)
-    Tracker::Scheduler::Job.new(nome: nome, intervalo_minutos: intervalo, janela: janela,
+    Tracker::Scheduler::Job.new(nome: nome, intervalo_minutos: intervalo,
+                                janela: janela && Tracker::Scheduler::Janela.parse(*janela),
                                 once_per_day: once_per_day, run: bloco || -> { }, logger: logger)
+  end
+
+  describe Tracker::Scheduler::Janela do
+    it "inclui as horas da faixa e exclui as de fora" do
+      janela = described_class.parse("09:00", "18:00")
+
+      expect(janela).to be_include(Time.zone.local(2026, 10, 21, 9, 0))
+      expect(janela).to be_include(Time.zone.local(2026, 10, 21, 18, 0))
+      expect(janela).not_to be_include(Time.zone.local(2026, 10, 21, 8, 59))
+      expect(janela).not_to be_include(Time.zone.local(2026, 10, 21, 18, 1))
+    end
+
+    it "sem as duas pontas não restringe horário" do
+      expect(described_class.parse(nil, "18:00")).to be_nil
+    end
   end
 
   describe Tracker::Scheduler::Job do

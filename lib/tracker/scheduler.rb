@@ -22,16 +22,40 @@ module Tracker
       end
     end
 
+    # Faixa de horas do dia em que um job pode rodar. Recebe as strings do
+    # ENV ("09:00") e responde a pergunta que o Job realmente faz. Antes o Job
+    # guardava dois inteiros e refazia a conta de minutos no predicado — a
+    # interface dizia "janela" e entregava um array que só ele sabia ler.
+    class Janela
+      # nil quando não há restrição de horário.
+      def self.parse(inicio, fim)
+        return nil if inicio.nil? || fim.nil?
+
+        new(em_minutos(inicio), em_minutos(fim))
+      end
+
+      def self.em_minutos(hora)
+        horas, minutos = hora.to_s.split(":").map(&:to_i)
+        (horas * 60) + minutos
+      end
+
+      def initialize(inicio, fim)
+        @inicio = inicio
+        @fim = fim
+      end
+
+      def include?(agora) = (agora.hour * 60 + agora.min).between?(@inicio, @fim)
+    end
+
     # Um job: janela + intervalo + o que rodar. `once_per_day` roda no máximo
     # uma vez por dia dentro da janela (a varredura de segurança).
     class Job
       attr_reader :nome
-      attr_accessor :proximo_em, :ultimo_sucesso_em
 
       def initialize(nome:, intervalo_minutos:, janela: nil, once_per_day: false, run:, logger: Rails.logger)
         @nome = nome
         @intervalo = intervalo_minutos.to_i * 60
-        @janela = janela && janela.map { |h| hora_para_minutos(h) }
+        @janela = janela
         @once_per_day = once_per_day
         @run = run
         @logger = logger
@@ -40,7 +64,7 @@ module Tracker
       end
 
       def due?(agora)
-        return false unless na_janela?(agora)
+        return false if @janela && !@janela.include?(agora)
         return false if @once_per_day && @ultimo_sucesso_em&.to_date == agora.to_date
         return true if @proximo_em.nil?
 
@@ -63,21 +87,6 @@ module Tracker
         # Backoff numa falha: não martela a API a cada tick.
         @proximo_em = agora + [ @intervalo, 300 ].min
       end
-
-      private
-
-      def na_janela?(agora)
-        return true if @janela.nil?
-
-        minutos = agora.hour * 60 + agora.min
-        inicio, fim = @janela
-        minutos.between?(inicio, fim)
-      end
-
-      def hora_para_minutos(hora)
-        horas, minutos = hora.to_s.split(":").map(&:to_i)
-        horas * 60 + minutos
-      end
     end
 
     def initialize(jobs:, logger: Rails.logger, tick: TICK_SECONDS, clock: -> { Time.current })
@@ -87,27 +96,30 @@ module Tracker
       @clock = clock
     end
 
+    # Fiação declarativa: cada job é "nome, de quanto em quanto tempo, em que
+    # faixa do dia, o que rodar". A janela já sai pronta (Janela), então este
+    # é o único lugar que sabe que o ENV traz duas strings de hora.
     def self.from_env
       new(jobs: [
         Job.new(nome: :notify, run: -> { Todos::UseCases::NotifyPendingTodos.new.call },
                 intervalo_minutos: ENV.fetch("TRACER_NOTIFY_INTERVAL_MINUTES", "45"),
-                janela: [ ENV.fetch("TRACER_NOTIFY_ACTIVE_START", "09:00"),
-                          ENV.fetch("TRACER_NOTIFY_ACTIVE_END", "18:00") ]),
+                janela: Janela.parse(ENV.fetch("TRACER_NOTIFY_ACTIVE_START", "09:00"),
+                                     ENV.fetch("TRACER_NOTIFY_ACTIVE_END", "18:00"))),
         Job.new(nome: :tracking, run: -> { Tracking::UseCases::RebuildDayReport.new.call },
                 intervalo_minutos: ENV.fetch("TRACER_TRACKING_INTERVAL_MINUTES", "30"),
-                janela: [ ENV.fetch("TRACER_TRACKING_ACTIVE_START", "08:00"),
-                          ENV.fetch("TRACER_TRACKING_ACTIVE_END", "23:50") ]),
+                janela: Janela.parse(ENV.fetch("TRACER_TRACKING_ACTIVE_START", "08:00"),
+                                     ENV.fetch("TRACER_TRACKING_ACTIVE_END", "23:50"))),
         # Rede de segurança: uma vez por dia, com o filtro largo do Jira, para
         # pegar card que o filtro estreito não vê (JQL não aceita "comment
         # CHANGED BY"). É a única execução de ~60 s/600 MB do dia.
         Job.new(nome: :jira_sweep,
                 run: -> { Tracking::UseCases::RebuildDayReport.new(filtro: "largo").call(Date.current) },
                 intervalo_minutos: 24 * 60, once_per_day: true,
-                janela: [ ENV.fetch("TRACER_JIRA_SWEEP_AT", "23:40"), "23:59" ]),
+                janela: Janela.parse(ENV.fetch("TRACER_JIRA_SWEEP_AT", "23:40"), "23:59")),
         Job.new(nome: :one_on_ones, run: -> { OneOnOnes::UseCases::ImportTranscription.new.call },
                 intervalo_minutos: ENV.fetch("TRACER_ONE_ON_ONES_INTERVAL_MINUTES", "45"),
-                janela: [ ENV.fetch("TRACER_ONE_ON_ONES_ACTIVE_START", "08:00"),
-                          ENV.fetch("TRACER_ONE_ON_ONES_ACTIVE_END", "23:50") ])
+                janela: Janela.parse(ENV.fetch("TRACER_ONE_ON_ONES_ACTIVE_START", "08:00"),
+                                     ENV.fetch("TRACER_ONE_ON_ONES_ACTIVE_END", "23:50")))
       ])
     end
 

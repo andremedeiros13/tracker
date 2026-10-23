@@ -42,7 +42,7 @@ RSpec.describe Todos::Repositories::TodoDatabase do
       database.notification_candidates
 
       expect(client).to have_received(:query_database).with(
-        filter: { or: [
+        "db-todos", filter: { or: [
           { property: "Status", status: { equals: "Pendente" } },
           { property: "Status", status: { equals: "Em andamento" } }
         ] }

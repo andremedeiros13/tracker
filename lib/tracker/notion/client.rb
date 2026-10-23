@@ -6,30 +6,32 @@ module Tracker
     # A superfície usada é pequena: GET database, POST query, POST pages,
     # POST/GET blocks, (PATCH page). Timeouts, retry de 429 e mapeamento de
     # erro ficam no transporte comum (Tracker::HTTP).
+    #
+    # É TRANSPORTE: cada operação recebe o id do recurso. Antes o
+    # `database_id` vinha no construtor e só `query_database`/`retrieve_database`
+    # o usavam — `from_env` exigia `TRACER_NOTION_DATABASE_ID`, então o ciclo
+    # do Brag (que só escreve numa page) morria por uma variável que nunca
+    # usava. Quem conhece o recurso é o repositório do domínio.
     class Client
       BASE = "https://api.notion.com/v1"
       VERSION = "2022-06-28"
 
-      def initialize(token:, database_id:)
+      def initialize(token:)
         @token = token
-        @database_id = database_id
       end
 
-      def self.from_env
-        new(token: ENV.fetch("TRACER_NOTION_TOKEN"),
-            database_id: ENV.fetch("TRACER_NOTION_DATABASE_ID"))
-      end
+      def self.from_env = new(token: ENV.fetch("TRACER_NOTION_TOKEN"))
 
-      def retrieve_database
-        request(:Get, "/databases/#{@database_id}")
+      def retrieve_database(database_id)
+        request(:Get, "/databases/#{database_id}")
       end
 
       # Paginação por cursor (has_more/start_cursor, 100/página — API Free).
-      def query_database(filter: nil)
+      def query_database(database_id, filter: nil)
         pages = []
         cursor = nil
         loop do
-          body = request(:Post, "/databases/#{@database_id}/query",
+          body = request(:Post, "/databases/#{database_id}/query",
                          body: { page_size: 100, start_cursor: cursor, filter: }.compact)
           pages.concat(body.fetch("results"))
           break unless body.fetch("has_more")

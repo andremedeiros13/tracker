@@ -92,13 +92,6 @@ RSpec.describe Tracker::Notion::PageDays do
     end
   end
 
-  describe "#header_exists?" do
-    it "é verdadeiro para o header do dia e falso para outro dia" do
-      expect(page_days.header_exists?(dia)).to be(true)
-      expect(page_days.header_exists?(Date.new(2020, 1, 1))).to be(false)
-    end
-  end
-
   describe ".day_of" do
     it "lê a data do header, ignorando o sufixo (dia da semana e épico)" do
       expect(described_class.day_of(header(texto: "21/10/2026 — quarta · [Motor][Wave2] Pagamento")))

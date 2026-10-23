@@ -3,7 +3,7 @@
 require "rails_helper"
 
 RSpec.describe Tracker::Notion::Client do
-  let(:client) { described_class.new(token: "tok", database_id: "db-1") }
+  let(:client) { described_class.new(token: "tok") }
 
   def http_success(body)
     resposta = instance_double(Net::HTTPOK, code: "200", body: JSON.generate(body), is_a?: true)

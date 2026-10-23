@@ -73,8 +73,6 @@ module Tracker
         sections(blocks:).find { |secao| secao.day == day.to_date }
       end
 
-      def header_exists?(day) = !section(day).nil?
-
       def blocks
         @client.block_children(@page_id)
       end

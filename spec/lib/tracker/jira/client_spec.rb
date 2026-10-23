@@ -46,17 +46,6 @@ RSpec.describe Tracker::Jira::Client do
     end
   end
 
-  describe "#changelog" do
-    it "pagina por isLast/nextPage" do
-      stub_request([
-        http_success({ "values" => [ { "id" => "1" } ], "isLast" => false, "nextPage" => "n2" }),
-        http_success({ "values" => [ { "id" => "2" } ], "isLast" => true })
-      ])
-
-      expect(client.changelog("ENG-1").map { |e| e["id"] }).to eq([ "1", "2" ])
-    end
-  end
-
   describe "#changelog_em_lote" do
     it "busca o changelog de vários issues e agrupa por issueId" do
       stub_request([

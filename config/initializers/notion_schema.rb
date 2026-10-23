@@ -12,6 +12,7 @@ Rails.application.config.after_initialize do
 
   Tracker::Notion::SchemaValidator.new(
     client: Tracker::Notion::Client.from_env,
+    database_id: ENV.fetch("TRACER_NOTION_DATABASE_ID"),
     expected: Todos::Repositories::NotionSchema::PROPERTIES
   ).validate!
 end

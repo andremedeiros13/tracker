@@ -9,15 +9,16 @@ module Tracker
     # sendo validado (hoje só o To-Dos, mas o validador não é do domínio
     # Todos: ele é do transporte do Notion).
     class SchemaValidator
-      def initialize(client:, expected:)
+      def initialize(client:, database_id:, expected:)
         @client = client
+        @database_id = database_id
         @expected = expected
       end
 
       # `expected` é { papel => { notion:, type:, options: } }; comparamos o
       # nome que o schema declara com o que a API devolve.
       def validate!
-        atual = @client.retrieve_database.fetch("properties")
+        atual = @client.retrieve_database(@database_id).fetch("properties")
         divergencias = []
         @expected.each do |papel, esperado|
           nome = esperado.fetch(:notion)

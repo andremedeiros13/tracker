@@ -30,7 +30,7 @@ module Todos
       # Pendências que o ciclo considera agora (pendente ou snoozed cujo
       # horário já venceu), ordenadas pelo que vence primeiro.
       def notification_candidates
-        @client.query_database(filter: filtro_de_status)
+        @client.query_database(@database_id, filter: filtro_de_status)
                .map { |page| @mapper.from_page(page) }
                .select(&:lembrete_ativo?)
                .sort_by { |t| t.snoozed_until || t.created_at }
