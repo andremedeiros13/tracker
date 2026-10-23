@@ -20,6 +20,11 @@ namespace :tracking do
     Tracking::UseCases::AdoptBragSection.new.call(dia)
   end
 
+  desc "Conserta o Brag fora de ordem (dry-run; APPLY=1 aplica) — DESTRUTIVO"
+  task repair_order: :environment do
+    Tracking::UseCases::RepairBragOrder.new.call
+  end
+
   desc "Descobre o customfield 'Reviewer' no Jira (copie o id pro .env)"
   task discover_reviewer: :environment do
     Tracking::UseCases::DiscoverReviewer.new.call

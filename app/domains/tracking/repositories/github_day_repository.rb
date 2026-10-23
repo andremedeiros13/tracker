@@ -136,14 +136,21 @@ module Tracking
       end
 
       # Commits fora de PR conhecido — o commit de PR já está contado no PR.
+      #
+      # O shape de /search/commits: `committer` na RAIZ é o usuário do GitHub
+      # (id, login…), sem data; a data do commit está em `commit.committer.date`.
+      # Ler a raiz estourava KeyError "date" e derrubava a coleta inteira do
+      # GitHub — o dia saía sem os commits E sem os PRs.
       def commits(nome, day, prs)
         @client.search_commits("author:#{nome} org:#{@org} committer-date:>=#{day - 1}").filter_map do |commit|
-          quando = Time.zone.parse(commit.fetch("committer").fetch("date"))
+          quando = Time.zone.parse(commit.dig("commit", "committer", "date").to_s)
+          next unless quando
+
           next unless quando.to_date == day
 
           Entities::Commit.new(
             sha: commit.fetch("sha"),
-            message: commit.fetch("commit").fetch("message").lines.first.to_s.strip,
+            message: commit.dig("commit", "message").to_s.lines.first.to_s.strip,
             url: commit.fetch("html_url"),
             repo: commit.dig("repository", "name"),
             committed_at: quando

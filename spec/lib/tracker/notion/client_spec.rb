@@ -71,5 +71,27 @@ RSpec.describe Tracker::Notion::Client do
 
       expect(JSON.parse(req.body)).not_to have_key("after")
     end
+
+    it "manda `position` no body quando dado (inserção no topo)" do
+      req = nil
+      http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:start).and_yield(http)
+      allow(http).to receive(:request) { |r| req = r; http_success({ "results" => [] }) }
+
+      client.append_block_children("page-1", [ { object: "block" } ], position: { type: "start" })
+
+      expect(JSON.parse(req.body)).to include("position" => { "type" => "start" })
+    end
+
+    it "não manda `position` quando ausente" do
+      req = nil
+      http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:start).and_yield(http)
+      allow(http).to receive(:request) { |r| req = r; http_success({ "results" => [] }) }
+
+      client.append_block_children("page-1", [ { object: "block" } ], after: "blk-0")
+
+      expect(JSON.parse(req.body)).not_to have_key("position")
+    end
   end
 end

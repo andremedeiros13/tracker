@@ -36,3 +36,16 @@ o Tracker criou, por dia, mais a assinatura do conteúdo renderizado de cada um.
   um `rake` rodando junto. Falha de ledger é logada e não derruba o ciclo.
 - O ledger é por `page_id`: trocar a página do Brag invalida o ledger antigo
   em vez de apagar blocks da página errada.
+
+## Emenda (2026-10-23): sentinel por dia e ordem decrescente
+
+O fallback por convenção assumia um único sentinel na página. Isso fazia o
+ciclo de um dia novo achar o sentinel do dia ANTERIOR e escrever os bullets
+dentro da seção dele (`achar_sentinel` varria a página inteira). Duas correções:
+
+- **Sentinel por seção**: cada dia tem o seu, logo abaixo do header. A busca é
+  escopada à seção do dia (`PageDays#section`), nunca à página.
+- **Ordem decrescente**: o dia mais recente fica no topo. O fallback por
+  convenção só assume posse dos blocks ENTRE o sentinel do dia e o próximo
+  header — que, na ordem decrescente, é o dia anterior.
+

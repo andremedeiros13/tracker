@@ -32,6 +32,24 @@ RSpec.describe Tracker::Notion::PageDays do
       expect(page_days.section(dia).map { |b| b.fetch("id") }).to eq(%w[h2 b1 b2])
     end
 
+    it "funciona em página decrescente (a seção termina no dia ANTERIOR)" do
+      allow(client).to receive(:block_children).and_return([
+        header(id: "h2", texto: "21/10/2026 — quarta"),
+        bloco(id: "b1"),
+        header(id: "h1", texto: "20/10/2026 — terça"),
+        bloco(id: "b-ontem")
+      ])
+
+      expect(page_days.section(dia).map { |b| b.fetch("id") }).to eq(%w[h2 b1])
+    end
+
+    it "aceita uma leitura já feita em `blocks:` (sem ir ao client)" do
+      leitura = [ header(id: "h2", texto: "21/10/2026 — quarta"), bloco(id: "b1") ]
+
+      expect(page_days.section(dia, blocks: leitura).map { |b| b.fetch("id") }).to eq(%w[h2 b1])
+      expect(client).not_to have_received(:block_children)
+    end
+
     it "com prefixo: casa o header com dia da semana (formato do Brag)" do
       expect(page_days.section(dia, prefixo: true).first.fetch("id")).to eq("h2")
     end
@@ -42,6 +60,22 @@ RSpec.describe Tracker::Notion::PageDays do
 
     it "dia sem seção devolve vazio" do
       expect(page_days.section(Date.new(2020, 1, 1))).to be_empty
+    end
+  end
+
+  describe "#day_of / #section_days" do
+    it "lê a data do header, ignorando o sufixo (dia da semana e épico)" do
+      expect(page_days.day_of(header(texto: "21/10/2026 — quarta · [Motor][Wave2] Pagamento")))
+        .to eq(dia)
+    end
+
+    it "devolve nil para header sem data e para bloco que não é header" do
+      expect(page_days.day_of(header(texto: "sem data aqui"))).to be_nil
+      expect(page_days.day_of(bloco(id: "b1"))).to be_nil
+    end
+
+    it "lista as datas na ordem em que aparecem na página" do
+      expect(page_days.section_days).to eq([ Date.new(2026, 10, 20), dia, Date.new(2026, 10, 22) ])
     end
   end
 

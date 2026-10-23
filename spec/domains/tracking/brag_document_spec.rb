@@ -33,7 +33,7 @@ RSpec.describe Tracking::BragDocument do
   def stub_client(existentes: [])
     sequencia = 0
     allow(client).to receive(:block_children).and_return(existentes)
-    allow(client).to receive(:append_block_children) do |_page, children, after: nil|
+    allow(client).to receive(:append_block_children) do |_page, children, after: nil, position: nil|
       registros = children.map do
         sequencia += 1
         { "id" => "novo-#{sequencia}" }
@@ -41,13 +41,14 @@ RSpec.describe Tracking::BragDocument do
       { "results" => registros }
     end
     allow(client).to receive(:delete_block) { { "object" => "block" } }
+    sequencia
   end
 
   # Captura os blocos enviados; header id h1, sentinel h2, body h3+.
   def capturar_appends
     envios = []
     allow(client).to receive(:block_children).and_return([])
-    allow(client).to receive(:append_block_children) do |_page, children, after: nil|
+    allow(client).to receive(:append_block_children) do |_page, children, after: nil, position: nil|
       envios.concat(children)
       { "results" => Array.new(children.size) { |i| { "id" => "blk-#{envios.size - children.size + i}" } } }
     end
@@ -64,9 +65,13 @@ RSpec.describe Tracking::BragDocument do
 
       expect(brag.rewrite(dia, report)).to eq(:reescrito)
 
-      expect(client).to have_received(:append_block_children).with("page-brag", [ hash_including(type: "heading_2") ], after: nil)
-      expect(client).to have_received(:append_block_children).with("page-brag", [ hash_including(type: "paragraph") ], after: "novo-1")
-      expect(client).to have_received(:append_block_children).with("page-brag", anything, after: "novo-2")
+      # Página vazia: o dia entra no topo, para o mais recente ficar em cima.
+      expect(client).to have_received(:append_block_children)
+        .with("page-brag", [ hash_including(type: "heading_2") ], after: nil, position: { type: "start" })
+      expect(client).to have_received(:append_block_children)
+        .with("page-brag", [ hash_including(type: "paragraph") ], after: "novo-1", position: nil)
+      expect(client).to have_received(:append_block_children)
+        .with("page-brag", anything, after: "novo-2")
     end
 
     it "monta o header com a data e o épico (sem o chamador saber do formato)" do
@@ -107,7 +112,7 @@ RSpec.describe Tracking::BragDocument do
       manual = { "id" => "manual-1", "type" => "paragraph",
                  "paragraph" => { "rich_text" => [ { "plain_text" => "minha nota" } ] } }
       allow(client).to receive(:block_children).and_return([ manual ])
-      allow(client).to receive(:append_block_children) { |_, children, after: nil| { "results" => children.map { { "id" => "novo-1" } } } }
+      allow(client).to receive(:append_block_children) { |_, children, after: nil, position: nil| { "results" => children.map { { "id" => "novo-1" } } } }
       allow(client).to receive(:delete_block)
 
       brag.rewrite(dia, report)
@@ -120,14 +125,16 @@ RSpec.describe Tracking::BragDocument do
 
       brag.rewrite(dia, report)
 
-      expect(client).to have_received(:append_block_children).with("page-brag", [ hash_including(type: "paragraph") ], after: "h-21/10/2026 — quarta")
-      expect(client).not_to have_received(:append_block_children).with("page-brag", [ hash_including(type: "heading_2") ], after: nil)
+      expect(client).to have_received(:append_block_children)
+        .with("page-brag", [ hash_including(type: "paragraph") ], after: "h-21/10/2026 — quarta", position: nil)
+      expect(client).not_to have_received(:append_block_children)
+        .with("page-brag", [ hash_including(type: "heading_2") ], after: nil, position: { type: "start" })
     end
 
     it "envia em lotes de 100 e encadeia a posição entre lotes (não inverte a ordem)" do
       stub_client
       posicoes = []
-      allow(client).to receive(:append_block_children) do |_page, children, after: nil|
+      allow(client).to receive(:append_block_children) do |_page, children, after: nil, position: nil|
         posicoes << [ children.size, after ]
         { "results" => children.map { { "id" => "x#{posicoes.size}-#{children.size}" } } }
       end
@@ -143,7 +150,7 @@ RSpec.describe Tracking::BragDocument do
 
     it "não grava signature nil quando a API devolve mais ids que blocos" do
       allow(client).to receive(:block_children).and_return([])
-      allow(client).to receive(:append_block_children) do |_page, children, after: nil|
+      allow(client).to receive(:append_block_children) do |_page, children, after: nil, position: nil|
         { "results" => Array.new(children.size + 1) { |i| { "id" => "x#{i}" } } }
       end
       allow(client).to receive(:delete_block)
@@ -160,7 +167,7 @@ RSpec.describe Tracking::BragDocument do
                              "paragraph" => { "rich_text" => [ { "plain_text" => Tracking::Renderers::BragBlocks::SENTINEL } ] } }
       sequencia = 0
       allow(client).to receive(:block_children).and_return([ header("21/10/2026 — quarta"), sentinel_existente ])
-      allow(client).to receive(:append_block_children) do |_page, _children, after: nil|
+      allow(client).to receive(:append_block_children) do |_page, _children, after: nil, position: nil|
         sequencia += 1
         { "results" => [ { "id" => "novo-#{sequencia}" } ] }
       end
@@ -180,7 +187,7 @@ RSpec.describe Tracking::BragDocument do
                 "bulleted_list_item" => { "rich_text" => [ { "plain_text" => "conteúdo gerado antes" } ] } }
       vizinho = header("22/10/2026 — quinta")
       allow(client).to receive(:block_children).and_return([ header("21/10/2026 — quarta"), sentinel_existente, orfao, vizinho ])
-      allow(client).to receive(:append_block_children) { |_p, c, after: nil| { "results" => c.map { { "id" => "novo" } } } }
+      allow(client).to receive(:append_block_children) { |_p, c, after: nil, position: nil| { "results" => c.map { { "id" => "novo" } } } }
       allow(client).to receive(:delete_block)
 
       brag.rewrite(dia, report)
@@ -204,6 +211,68 @@ RSpec.describe Tracking::BragDocument do
 
       expect(brag.rewrite(dia, report(items: []))).to eq(:reescrito)
       expect(client).to have_received(:delete_block)
+    end
+
+    context "ordem decrescente (dia mais recente no topo)" do
+      let(:dia22) { Date.new(2026, 10, 22) }
+
+      def secao(data, header_id:, sentinel_id:, body: [])
+        [ header(data),
+          { "id" => sentinel_id, "type" => "paragraph",
+            "paragraph" => { "rich_text" => [ { "plain_text" => Tracking::Renderers::BragBlocks::SENTINEL } ] } } ] +
+          body.map { |id| { "id" => id, "type" => "bulleted_list_item",
+                            "bulleted_list_item" => { "rich_text" => [ { "plain_text" => id } ] } } }
+      end
+
+      it "dia sem seção numa página não vazia entra no topo" do
+        antigos = secao("21/10/2026 — quarta", header_id: "h-21", sentinel_id: "s-21", body: [ "b-21" ])
+        stub_client(existentes: antigos)
+
+        brag.rewrite(dia22, report(items: [ item(texto: "hoje") ]))
+
+        expect(client).to have_received(:append_block_children)
+          .with("page-brag", [ hash_including(type: "heading_2") ], after: nil, position: { type: "start" })
+      end
+
+      it "o sentinel é por dia: não reaproveita o de outro dia" do
+        antigos = secao("21/10/2026 — quarta", header_id: "h-21", sentinel_id: "s-21", body: [ "b-21" ])
+        stub_client(existentes: antigos)
+
+        brag.rewrite(dia22, report(items: [ item(texto: "hoje") ]))
+
+        expect(ledger.day(dia22)[:sentinel_id]).not_to eq("s-21")
+        # O corpo de hoje não foi escrito dentro da seção de ontem.
+        expect(client).not_to have_received(:append_block_children)
+          .with("page-brag", anything, after: "s-21", position: nil)
+        expect(client).not_to have_received(:delete_block).with("b-21")
+      end
+
+      it "backfill de um dia mais antigo que todos entra no fim" do
+        mais_novo = secao("22/10/2026 — quinta", header_id: "h-22", sentinel_id: "s-22", body: [ "b-22" ])
+        stub_client(existentes: mais_novo)
+
+        brag.rewrite(dia, report(items: [ item(texto: "atrasado") ]))
+
+        # Entra depois do último block da seção vizinha (a mais antiga que o
+        # antecede na página) — que, sendo a última, equivale ao fim da página.
+        expect(client).to have_received(:append_block_children)
+          .with("page-brag", [ hash_including(type: "heading_2") ],
+                after: nil, position: { type: "after_block", after_block: { id: "b-22" } })
+      end
+
+      it "dia entre dois já existentes entra entre eles" do
+        pagina = secao("23/10/2026 — sexta", header_id: "h-23", sentinel_id: "s-23", body: [ "b-23" ]) +
+                 secao("21/10/2026 — quarta", header_id: "h-21", sentinel_id: "s-21", body: [ "b-21" ])
+        stub_client(existentes: pagina)
+
+        brag.rewrite(dia22, report(items: [ item(texto: "no meio") ]))
+
+        # Depois do último block de 23/10 (o vizinho mais novo), ficando
+        # abaixo dele e acima de 21/10.
+        expect(client).to have_received(:append_block_children)
+          .with("page-brag", [ hash_including(type: "heading_2") ],
+                after: nil, position: { type: "after_block", after_block: { id: "b-23" } })
+      end
     end
   end
 

@@ -50,12 +50,20 @@ module Tracker
       # 400 invalid_request_url em toda page (anomalia da API, testada em
       # 2026-10-15 com curl e Net::HTTP); o PATCH no mesmo path appenda.
       #
-      # `after:` insere logo depois do block indicado (validado em 2026-10-21
-      # contra a API, versão 2022-06-28 — nessa versão o parâmetro se chama
-      # "after", não "position"). Sem ele, appenda no fim da page.
-      def append_block_children(page_id, children, after: nil)
+      # Onde os children entram na page:
+      #   `after: id`             → logo depois daquele block
+      #   `position: {type: "start"}` → topo da page
+      #   nada                   → fim da page
+      # Os dois parâmetros não podem ir juntos na mesma chamada.
+      #
+      # `position` foi validado em 2026-10-23 contra a API na versão que
+      # fixamos (2022-06-28): `start` insere no topo preservando a ordem do
+      # lote, e `after_block` insere depois de um block (404 se o id não
+      # existir). `after` continua aceito, marcado como deprecated.
+      def append_block_children(page_id, children, after: nil, position: nil)
         body = { children: }
         body[:after] = after if after
+        body[:position] = position if position
         request(:Patch, "/blocks/#{page_id}/children", body:)
       end
 

@@ -31,6 +31,11 @@ API de blocks — ADR 0001).
   header por dia (`heading_2` com a data), bullets com link clicável
   (decisão #12). O ledger local guarda só os ids que geramos, para apagar o
   nosso sem tocar no que foi escrito à mão
+- **Ordem do documento**: decrescente — o dia mais recente fica no topo. Um dia
+  novo entra no topo; um dia no meio entra depois do fim da seção do próximo dia
+  mais novo; um backfill mais antigo que todos entra no fim. Cada seção tem o
+  seu próprio sentinel, logo abaixo do header: é ele que delimita a seção e
+  impede a escrita de um dia de cair dentro de outro
 
 ## Fontes de verdade
 

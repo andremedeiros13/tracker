@@ -13,6 +13,18 @@ module Tracking
   # incremental congela o registro no primeiro ciclo e mostra "PR aberto"
   # para sempre. A cada mudança, a seção do dia é reescrita inteira.
   #
+  # ORDEM: decrescente — o dia mais recente fica no topo (decisão de
+  # 2026-10-23). Um dia novo entra antes da primeira seção existente; se ele
+  # já for o mais antigo (backfill), entra no fim. A seção de um dia pode
+  # terminar num header de data ANTERIOR, então nada aqui pode assumir
+  # "crescente" ao ler a página.
+  #
+  # Cada seção tem o SEU sentinel, logo abaixo do header: é o que define onde
+  # a seção daquele dia começa e impede que a escrita de um dia caia dentro de
+  # outro. (Um sentinel único para a página fazia o ciclo de um dia novo
+  # inserir os bullets abaixo do sentinel do dia anterior — bug de 22 e
+  # 23/10/2026.)
+  #
   # Quem manda apagar é o ledger (Tracker::Brag::BlockLedger): só os ids que
   # nós criamos. Um bloco escrito à mão na seção não está no ledger e nunca é
   # tocado. Sem ledger confiável, cai no fallback por convenção — que só assume
@@ -47,28 +59,18 @@ module Tracking
     #   :reescrito     — apagou o que era nosso e escreveu de novo.
     def rewrite(day, report)
       blocos = report.vazio? ? [ @renderer.sem_atividade ] : @renderer.items(report)
+      assinaturas = blocos.map { |bloco| Renderers::BragBlocks.signature(bloco) }
 
       # Lock entre processos: o daemon e um rake rodando junto (ou dois ticks
       # sobrepostos) reescreviam a mesma seção em paralelo.
       @ledger.with_lock do
         estado = @ledger.day(day)
         next :sem_atividade if report.vazio? && estado.nil?
-
-        assinaturas = blocos.map { |bloco| Renderers::BragBlocks.signature(bloco) }
+        # Comparar ANTES de ler a página: o caminho de "nada mudou" (a maioria
+        # dos ciclos) não faz nenhum request.
         next :sem_mudanca if inalterado?(estado, assinaturas)
 
-        header_id = estado&.dig(:header_id) || achar_header(day) || criar(@renderer.header(day, report.epic_note))
-        sentinel_id = estado&.dig(:sentinel_id) || achar_sentinel || criar(@renderer.sentinel, after: header_id)
-
-        # Sem ledger mas com sentinel, a seção é nossa: adota os blocos que já
-        # estão lá a partir do sentinel (é o que impede o rebuild de
-        # ACRESCENTAR uma cópia quando o ledger some/é apagado).
-        adotar_sem_ledger(day, estado, header_id, sentinel_id) if estado.nil?
-
-        apagar_do_dia(@ledger.day(day))
-        criados = escrever(blocos, after: sentinel_id)
-        @ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
-                            blocks: pares(criados, assinaturas))
+        rewrite_section(day, report, blocos, assinaturas, estado)
         :reescrito
       end
     end
@@ -95,6 +97,67 @@ module Tracking
     end
 
     private
+
+    # Caminho de escrita: com a página lida uma única vez, decide os ids da
+    # seção (header, sentinel), apaga o que é nosso e escreve de novo.
+    def rewrite_section(day, report, blocos, assinaturas, estado)
+      blocks = @page_days.blocks
+      secao = @page_days.section(day, blocks:)
+
+      header_id = estado&.dig(:header_id) || header_da_secao(secao)
+      # Sentinel é POR DIA: procurado só dentro da seção. Sem isso, o dia novo
+      # pegava o sentinel do dia anterior e escrevia dentro da seção dele.
+      sentinel_id = estado&.dig(:sentinel_id) || sentinel_da_secao(secao)
+
+      # Posição do header da seção nova, mantendo a página decrescente: topo se
+      # o dia é o mais recente, depois do fim da seção vizinha se está no meio,
+      # fim da página se é mais antigo que todos. Ver `posicao_da_secao`.
+      unless header_id
+        header_id = criar(@renderer.header(day, report.epic_note), **posicao_da_secao(day, blocks))
+      end
+      sentinel_id ||= criar(@renderer.sentinel, after: header_id)
+
+      # Sem ledger mas com sentinel, a seção é nossa: adota os blocos que já
+      # estão lá a partir do sentinel (é o que impede o rebuild de
+      # ACRESCENTAR uma cópia quando o ledger some/é apagado).
+      adotar_sem_ledger(day, estado, header_id, sentinel_id) if estado.nil?
+
+      apagar_do_dia(@ledger.day(day))
+      criados = escrever(blocos, after: sentinel_id)
+      @ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
+                          blocks: pares(criados, assinaturas))
+    end
+
+    # Header do dia já presente na página (ledger perdido), procurado na seção.
+    def header_da_secao(secao)
+      secao.find { |block| @page_days.header?(block) }&.fetch("id")
+    end
+
+    # Sentinel do dia já presente na seção (o ledger pode não ter o id se uma
+    # escrita falhou no meio). Antes procurava na página inteira e pegava o de
+    # outro dia.
+    def sentinel_da_secao(secao)
+      secao.select { |b| @page_days.block?(b, "paragraph") && @page_days.text(b).include?(Renderers::BragBlocks::SENTINEL) }
+           .first&.fetch("id")
+    end
+
+    # Argumentos de posicionamento para o header de uma seção nova, mantendo a
+    # página em ordem decrescente.
+    #
+    # A seção entra logo DEPOIS do fim da seção do próximo dia mais novo que
+    # ela (o menor `d > day`): é o vizinho imediato na ordem decrescente. Se
+    # esse vizinho for a última seção da página, o efeito é append no fim —
+    # que é o caso do backfill de um dia mais antigo que todos. Se não existe
+    # dia mais novo (página vazia, ou o dia é o mais recente), entra no topo.
+    def posicao_da_secao(day, blocks)
+      vizinho = @page_days.section_days(blocks:).select { |d| d > day.to_date }.min
+      return { position: { type: "start" } } if vizinho.nil?
+
+      ultimo = @page_days.section(vizinho, blocks:).last
+      return { position: { type: "start" } } if ultimo.nil?
+
+      { position: { type: "after_block", after_block: { id: ultimo.fetch("id") } } }
+    end
 
     # Seção nossa (tem sentinel) mas o ledger sumiu: os blocos abaixo do
     # sentinel, até o próximo header, passam a ser propriedade nossa e serão
@@ -125,23 +188,8 @@ module Tracking
       Array(estado[:blocks]).map { |b| b[:signature] } == assinaturas
     end
 
-    # Ano + data do header, procurado no documento — usado quando o ledger
-    # sumiu mas o header (criado por nós antes) continua na page.
-    def achar_header(day)
-      @page_days.section(day).find { |block| @page_days.header?(block) }&.fetch("id")
-    end
-
-    def criar(bloco, after: nil)
-      @client.append_block_children(@page_id, [ bloco ], after:).fetch("results").first.fetch("id")
-    end
-
-    # Sentinels já criados por tentativas anteriores (o ledger pode não ter o
-    # id se uma escrita falhou no meio). Sem isso, cada ciclo falho deixava
-    # mais um parágrafo "gerado pelo Tracker" na página.
-    def achar_sentinel
-      @page_days.blocks
-                .select { |b| @page_days.block?(b, "paragraph") && @page_days.text(b).include?(Renderers::BragBlocks::SENTINEL) }
-                .first&.fetch("id")
+    def criar(bloco, after: nil, position: nil)
+      @client.append_block_children(@page_id, [ bloco ], after:, position:).fetch("results").first.fetch("id")
     end
 
     # Apaga só o que está no ledger. `delete_block` trata 404 como sucesso

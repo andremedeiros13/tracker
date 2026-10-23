@@ -17,7 +17,7 @@ Crie uma page "Tracker" com esta estrutura (é a única configuração no Notion
 ```
 📄 Tracker (page)
    ├── 🗂️ To-Dos (database — board por Status)   ← a fila de atenção
-   ├── 📄 Brag document (page)                   ← entregas diárias
+   ├── 📄 Brag document (page)                   ← entregas diárias, dia mais recente no topo
    └── 🗣️ 1-on-1 (page)                          ← histórico de conversas
 ```
 
@@ -115,6 +115,7 @@ bin/start                          # sobe com servidor HTTP em :3931 (debug)
 rake tracking:preview[21/10/2026]  # imprime o dia SEM escrever no Notion
 rake tracking:rebuild[21/10/2026]  # reconstrói a seção do dia agora
 rake tracking:adopt[21/10/2026]    # migra uma seção no formato antigo (uma vez)
+rake tracking:repair_order         # conserta o Brag fora de ordem (dry-run; APPLY=1 aplica)
 rake tracking:discover_reviewer    # acha o id do customfield Reviewer no Jira
 rake one_on_ones:import            # importa as transcrições agora
 ```
