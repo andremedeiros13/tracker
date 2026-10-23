@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(bin/ci)",
+      "Bash(bin/rubocop*)",
+      "Bash(bin/brakeman*)",
+      "Bash(bin/bundler-audit*)",
+      "Bash(bin/setup*)",
+      "Bash(bundle exec rspec*)",
+      "Bash(bundle exec rubocop*)",
+      "Bash(bundle install*)",
+      "Bash(bundle check)",
+      "Bash(RAILS_ENV=test bin/rails*)",
+      "Bash(bin/rails runner*)",
+      "Bash(rake tracking:*)",
+      "Bash(rake one_on_ones:*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git branch*)",
+      "Bash(gh pr view*)",
+      "Bash(gh issue view*)",
+      "Bash(gh run view*)",
+      "Bash(ls*)",
+      "Bash(cat*)",
+      "Bash(head*)",
+      "Bash(tail*)",
+      "Bash(wc*)",
+      "Bash(find*)",
+      "Bash(grep*)",
+      "Bash(rg*)",
+      "Bash(which*)",
+      "Bash(ruby --version)",
+      "Bash(bash -n*)",
+      "Bash(sh -n*)",
+      "Bash(jq*)",
+      "Bash(chmod +x .claude/hooks/*)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./config/master.key)",
+      "Read(./config/credentials.yml.enc)",
+      "Bash(cat .env*)",
+      "Bash(cat config/master.key*)",
+      "Bash(printenv TRACER*)",
+      "Bash(printenv NOTION*)",
+      "Bash(printenv JIRA*)",
+      "Bash(printenv GITHUB*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/lint-changed.sh",
+            "timeout": 120
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/specs.sh",
+            "timeout": 180
+          }
+        ]
+      }
+    ]
+  }
+}

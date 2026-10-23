@@ -40,6 +40,11 @@
 !/one_on_ones/.gitkeep
 
 # Tooling de sessão (não é do projeto)
-/.claude/
-/.serena/
+# A config compartilhada do Claude e do Serena é versionada; o que é escolha
+# pessoal (permissões locais, cache) fica de fora.
+/.claude/*
+!/.claude/settings.json
+!/.claude/hooks/
+/.serena/*
+!/.serena/project.yml
 /.scratch/
