@@ -50,7 +50,10 @@ module Tracking
         imprimir_plano(secoes, alvos)
         return 0 unless @apply
 
-        secoes.each { |secao| backup(secao.day, secao.blocks) }
+        secoes.each do |secao|
+          caminho = Tracker::Brag::Backup.section(secao.day, secao.blocks, suffix: "-antes-do-repair")
+          @stdout.puts("Backup: #{caminho}")
+        end
         # Apagar é do módulo da seção: só o que está no ledger, com resgate de
         # erro por bloco.
         @brag.forget(alvos)
@@ -69,17 +72,6 @@ module Tracking
         alvos.each { |dia| @stdout.puts("  #{Renderers::BragBlocks.data_do_dia(dia)}") }
         @stdout.puts("Dias a esquecer e reconstruir: #{alvos.size}")
         @stdout.puts("(dry-run — rode com APPLY=1 para aplicar)") unless @apply
-      end
-
-      # Texto atual da seção, antes de apagar: o conteúdo antigo não é
-      # recuperável pelo ledger depois. Nome distinto do backup do rewrite
-      # para não sobrescrever o `.bak` da adoção.
-      def backup(dia, blocos)
-        dir = Rails.root.join("storage/tracking")
-        FileUtils.mkdir_p(dir)
-        caminho = dir.join("brag_#{dia.iso8601}-antes-do-repair.bak")
-        File.write(caminho, blocos.map { |b| "#{b.fetch('type')}: #{Tracker::Notion::PageDays.text_of(b)}" }.join("\n"))
-        @stdout.puts("Backup: #{caminho}")
       end
     end
   end

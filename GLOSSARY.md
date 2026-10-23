@@ -59,13 +59,20 @@ Vocabulário de *deep modules* usado nas decisões deste repo.
   de transporte (timeouts, 429, erro) para Notion/Jira/GitHub.
 - `Tracker::Notion::PageDays#section(day)` / `#sections` — leitura de page com
   registros por dia (Brag e 1-on-1). Devolve `Tracker::Notion::Section`
-  (`day`, `header_id`, `body`, `body_ids`, `last_id`), não blocos crus: quem
-  pergunta "qual é a seção do dia" não recombina predicados. `.day_of(block)`,
-  `.text_of(block)` e `.marker(day)` são funções de módulo (não dependem da
-  page). Só leitura: posse de escrita continua com cada repositório.
-- `Tracking::BragDocument#rewrite(day, report)` / `#adopt(day)` / `#forget(days)`
-  — a seção do dia, incluindo o que é nosso apagar. O sentinel é conhecido
-  aqui (`sentinel?`), não recopiado por quem precisa dele.
+  (`day`, `header_id`, `blocks`, `body`, `last_id`, `empty?`), não blocos crus:
+  quem pergunta "qual é a seção do dia" não recombina predicados.
+  `.day_of(block)`, `.text_of(block)` e `.marker(day)` são funções de módulo
+  (não dependem da page). Só leitura: posse de escrita continua com cada
+  repositório.
+- `Tracking::BragDocument#rewrite(day, report)` / `#preview(day, report)` /
+  `#adopt(day)` / `#forget(days)` — a seção do dia nas duas formas (blocos do
+  Notion e texto do preview), incluindo o que é nosso apagar. O sentinel é
+  conhecido aqui (`sentinel?`), não recopiado por quem precisa dele.
+- `Tracker::Brag::Backup.section(day, blocks, suffix:)` — dump em texto de uma
+  seção antes de operação destrutiva; o formato do backup existe uma vez.
+- `Tracker::Notion::Client` — transporte. Toda operação recebe o id do
+  recurso (`query_database(database_id)`, `retrieve_database(database_id)`);
+  quem conhece o recurso é o repositório do domínio.
 - `Todos::Repositories::NotionSchema.name_of(role)` / `.label_of(role, value)` /
   `.value_of(role, label)` — propriedades por papel de domínio (`:status`,
   `:origin`, `:snoozed`); o nome literal do Notion existe uma vez só.

@@ -11,7 +11,7 @@ importação de 1-on-1.
 
 ```bash
 bin/ci                     # o gate: rubocop + bundler-audit + brakeman + rspec
-bundle exec rspec          # suíte (191 exemplos, ~1s, zero rede)
+bundle exec rspec          # suíte (202 exemplos, ~1s, zero rede)
 bin/rubocop                # usa .rubocop.yml explicitamente
 bin/tracker                # daemon em production, sem porta HTTP
 bin/start                  # debug: sobe o servidor em :3931 (a 3000 é de outro app)
