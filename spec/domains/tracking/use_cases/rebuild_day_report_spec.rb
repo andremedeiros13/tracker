@@ -48,16 +48,14 @@ RSpec.describe Tracking::UseCases::RebuildDayReport do
       expect(use_case.call(dia)).to eq(0)
     end
 
-    it "com dry_run não toca no Notion e imprime" do
+    it "com dry_run não escreve: pede o preview ao módulo do Brag e imprime" do
+      allow(brag).to receive(:preview).and_return("== 2026-10-21 ==\n## 21/10/2026 — quarta\n• #1 · card")
+
       expect(use_case(dry_run: true).call(dia)).to eq(0)
 
       expect(brag).not_to have_received(:rewrite)
-      expect(stdout.string).to include("#1 · card")
-    end
-
-    it "dry_run imprime o header do dia com o formato do renderer" do
-      use_case(dry_run: true).call(dia)
-
+      expect(brag).to have_received(:preview).with(dia, an_instance_of(Tracking::Entities::DayReport))
+      expect(stdout.string).to include("• #1 · card")
       expect(stdout.string).to include("## 21/10/2026 — quarta")
     end
 

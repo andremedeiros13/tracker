@@ -40,9 +40,6 @@ module Tracking
 
       def merged? = outcome == :merged
       def concluded? = %i[merged done].include?(outcome)
-
-      # "#2301" — a referência curta que abre o bullet.
-      def referencia = key ? "##{key.split('-').last}" : "PR ##{pull_requests.first&.number}"
     end
   end
 end

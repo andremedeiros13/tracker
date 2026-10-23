@@ -18,8 +18,7 @@ module Tracking
 
       def initialize(jira: nil, github: nil, brag: nil,
                      logger: Rails.logger, dry_run: ENV["TRACER_DRY_RUN"] == "1",
-                     filtro: ENV.fetch("TRACER_JIRA_FILTRO", "estreito"), stdout: $stdout,
-                     renderer: Renderers::BragBlocks.new)
+                     filtro: ENV.fetch("TRACER_JIRA_FILTRO", "estreito"), stdout: $stdout)
         @jira = jira
         @github = github
         # nil = criar o módulo real. O caminho que NÃO escreve é dry_run: = 1
@@ -29,7 +28,6 @@ module Tracking
         @dry_run = dry_run
         @filtro = filtro
         @stdout = stdout
-        @renderer = renderer
       end
 
       def call(day = Date.current)
@@ -49,10 +47,11 @@ module Tracking
 
       def reconstruir(day)
         report = BuildDayReport.new.call(day, jira: coletar_jira(day), github: coletar_github(day))
-        if @dry_run
-          imprimir(day, report)
-          return 0
-        end
+        # O preview em texto é do módulo do Brag: ele é o dono da copy, então
+        # as duas formas (blocos e texto) saem do mesmo lugar. Antes este use
+        # case mantinha um segundo traversal que precisava concordar com o
+        # renderer sobre header, ordem e dia vazio.
+        return preview(day, report) if @dry_run
 
         resultado = brag.rewrite(day, report)
         @logger.info("[tracking] #{day.iso8601}: #{resultado}")
@@ -61,7 +60,12 @@ module Tracking
 
       # Módulo real, criado sob demanda (o dry_run não instancia Notion).
       def brag
-        @brag ||= Tracking::BragDocument.new(renderer: @renderer)
+        @brag ||= Tracking::BragDocument.new
+      end
+
+      def preview(day, report)
+        @stdout.puts(brag.preview(day, report))
+        0
       end
 
       def coletar_jira(day)
@@ -76,24 +80,6 @@ module Tracking
       rescue Tracker::Error, KeyError => e
         @logger.error("[tracking] github: #{e.class}: #{e.message}")
         Entities::GitHubDay.new
-      end
-
-      # Preview em texto (usado pelo rake e pelo TRY_RUN) — permite ler o
-      # resultado real antes de qualquer escrita no Notion. Renderiza, não
-      # introspecta blocks: o mesmo caminho que escreveria, inclusive a
-      # decisão de "dia vazio", que é do renderer e não se repete aqui.
-      def imprimir(day, report)
-        @stdout.puts("== #{day.iso8601} ==")
-        @stdout.puts("## #{texto_rich(@renderer.header(day, report.epic_note)[:heading_2])}")
-        @renderer.items(report).each do |bloco|
-          tipo = bloco.fetch(:type).to_sym
-          @stdout.puts("• #{texto_rich(bloco[tipo])}")
-          Array(bloco[tipo][:children]).each { |filho| @stdout.puts("    - #{texto_rich(filho[filho.fetch(:type).to_sym])}") }
-        end
-      end
-
-      def texto_rich(conteudo)
-        Array(conteudo[:rich_text]).map { |t| t[:text][:content] }.join
       end
     end
   end

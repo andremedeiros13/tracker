@@ -67,6 +67,21 @@ module Tracking
         paragrafo(texto, tipo: "heading_2", chave: :heading_2)
       end
 
+      # O MESMO conteúdo em texto puro, para o preview (rake tracking:preview e
+      # TRACER_DRY_RUN). Mora aqui porque a copy é deste módulo: antes o use
+      # case mantinha um segundo caminho de renderização em texto, e os dois
+      # precisavam concordar sobre header, ordem e dia vazio.
+      def preview(day, report)
+        linhas = [ "== #{day.iso8601} ==", "## #{texto_do_bloco(header(day, report.epic_note))}" ]
+        items(report).each do |bloco|
+          linhas << "• #{texto_do_bloco(bloco)}"
+          Array(bloco.dig(bloco.fetch(:type).to_sym, :children)).each do |filho|
+            linhas << "    - #{texto_do_bloco(filho)}"
+          end
+        end
+        linhas.join("\n")
+      end
+
       def resumir(texto)
         texto = texto.to_s.squish
         texto.length > EPICO_MAX ? "#{texto[0, EPICO_MAX - 1].rstrip}…" : texto
@@ -112,9 +127,24 @@ module Tracking
         }
       end
 
+      # Texto plano de um bloco renderizado — o preview não introspecta o shape
+      # da API, lê o que o próprio renderer escreveu (`type` é string, o
+      # payload do bloco é indexado pelo símbolo correspondente).
+      def texto_do_bloco(bloco)
+        Array(bloco.dig(bloco.fetch(:type).to_sym, :rich_text)).map { |t| t[:text][:content] }.join
+      end
+
+      # "#2301" para card, "PR #1216" para item sem card. Copy, portanto aqui —
+      # antes vivia na entity e o domínio carregava formato de documento.
+      def referencia_de(item)
+        return "##{item.key.split('-').last}" if item.key
+
+        "PR ##{item.pull_requests.first&.number}"
+      end
+
       # "#2301 · " + título (link) + " — MERGEADO 16:48" (ou "card de Itallo").
       def texto_do_item(item)
-        textos = [ { type: "text", text: { content: "#{item.referencia} · " } } ]
+        textos = [ { type: "text", text: { content: "#{referencia_de(item)} · " } } ]
         # O link vai DENTRO de `text` — ao lado, a API responde 400
         # ("rich_text[1].link should be not present").
         textos << { type: "text", text: { content: item.title, link: { url: item.url } } }
@@ -156,10 +186,22 @@ module Tracking
 
       def linha_do_pr(pr, item)
         partes = [ "PR ##{pr.number}" ]
-        partes << pr.metricas if pr.metricas
+        partes << metricas_do_pr(pr) if metricas_do_pr(pr)
         partes << "aberto #{data_hora(pr.created_at, item_day(item))}"
         partes << "mergeado #{hora(pr.merged_at)}" if pr.merged_at
         partes.join(" · ")
+      end
+
+      # "14 commits · 17 arquivos · +1257/−55" — o peso da entrega, que o
+      # título não conta. Nil quando o detalhe do PR não veio (falha de rede).
+      def metricas_do_pr(pr)
+        return unless pr.changed_files
+
+        partes = []
+        partes << "#{pr.commits} commit#{'s' unless pr.commits == 1}" if pr.commits
+        partes << "#{pr.changed_files} arquivo#{'s' unless pr.changed_files == 1}"
+        partes << "+#{pr.additions}/−#{pr.deletions}" if pr.additions && pr.deletions
+        partes.join(" · ").presence
       end
 
       def item_day(item) = (item.outcome_at || item.last_activity_at || Time.current).to_date

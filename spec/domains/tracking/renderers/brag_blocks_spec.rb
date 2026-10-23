@@ -190,6 +190,22 @@ RSpec.describe Tracking::Renderers::BragBlocks do
     end
   end
 
+  describe "#preview" do
+    it "é o mesmo conteúdo dos blocos: header, itens e sub-bullets" do
+      texto_preview = renderer.preview(dia, report)
+
+      expect(texto_preview).to include("== 2026-10-21 ==")
+      expect(texto_preview).to include("## 21/10/2026 — quarta")
+      expect(texto_preview).to include("• #2301 · [Payments] T11 captura — MERGEADO 16:48")
+      expect(texto_preview).to include("    - Antes: Nada grava.")
+    end
+
+    it "dia vazio mostra o 'sem atividade', como os blocos" do
+      expect(renderer.preview(dia, report(work_items: [])))
+        .to include("• — sem atividade registrada —")
+    end
+  end
+
   describe ".signature" do
     it "muda quando o conteúdo muda e é estável quando não" do
       a = renderer.items(report).first

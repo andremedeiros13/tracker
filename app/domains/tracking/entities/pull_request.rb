@@ -5,6 +5,9 @@ module Tracking
     # Um PR do engenheiro que aparece no dia — aberto, atualizado ou mergeado.
     # Só os campos que o Brag mostra; `my_comment_rounds` é quantas reviews
     # COMMENTED eu deixei no meu próprio PR (rodadas de ajuste).
+    #
+    # O peso da entrega ("14 commits · 17 arquivos · +1257/−55") é copy do
+    # renderer — aqui ficam os números, não a frase.
     PullRequest = Data.define(
       :number, :title, :url, :repo, :body,
       :created_at, :merged_at,
@@ -20,18 +23,6 @@ module Tracking
       end
 
       def merged? = !merged_at.nil?
-
-      # "14 commits · 17 arquivos · +1257/−55" — o peso da entrega, que o
-      # título não conta. Nil quando o detalhe do PR não veio (falha de rede).
-      def metricas
-        return unless changed_files
-
-        partes = []
-        partes << "#{commits} commit#{'s' unless commits == 1}" if commits
-        partes << "#{changed_files} arquivo#{'s' unless changed_files == 1}"
-        partes << "+#{additions}/−#{deletions}" if additions && deletions
-        partes.join(" · ").presence
-      end
     end
   end
 end

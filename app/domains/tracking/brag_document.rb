@@ -33,20 +33,25 @@ module Tracking
     # Teto de children por chamada da API do Notion.
     LOTE_DE_BLOCKS = 100
 
-    def initialize(client: Tracker::Notion::Client.from_env,
-                   page_id: ENV.fetch("TRACER_NOTION_BRAG_PAGE_ID"),
-                   ledger: nil,
+    # Client, page e ledger são resolvidos sob demanda: `preview` só renderiza
+    # texto e não deve exigir token nem page configurada (o `rake
+    # tracking:preview` roda numa máquina que só quer ver o dia).
+    def initialize(client: nil, page_id: nil, ledger: nil,
                    renderer: Renderers::BragBlocks.new,
                    logger: Rails.logger,
                    stdout: $stdout)
       @client = client
       @page_id = page_id
-      @ledger = ledger || Tracker::Brag::BlockLedger.new(page_id: page_id)
+      @ledger = ledger
       @renderer = renderer
       @logger = logger
       @stdout = stdout
-      @page_days = Tracker::Notion::PageDays.new(client:, page_id:)
     end
+
+    # O MESMO conteúdo de `rewrite`, em texto puro — o dono da copy responde
+    # pelas duas formas. Nenhum request: é o caminho do `rake tracking:preview`
+    # e do TRACER_DRY_RUN, que existem justamente para ler antes de escrever.
+    def preview(day, report) = @renderer.preview(day, report)
 
     # Reescreve a seção do dia com o conteúdo do report.
     #
@@ -57,14 +62,16 @@ module Tracking
     #                    NENHUM request de escrita acontece (é o que faz um
     #                    ciclo de 30 min sem novidade custar quase nada).
     #   :reescrito     — apagou o que era nosso e escreveu de novo.
+    #   nil            — outro processo segurava o lock: nada foi feito, o
+    #                    próximo ciclo tenta (não é erro).
     def rewrite(day, report)
       blocos = @renderer.items(report)
       assinaturas = blocos.map { |bloco| Renderers::BragBlocks.signature(bloco) }
 
       # Lock entre processos: o daemon e um rake rodando junto (ou dois ticks
       # sobrepostos) reescreviam a mesma seção em paralelo.
-      @ledger.with_lock do
-        estado = @ledger.day(day)
+      ledger.with_lock do
+        estado = ledger.day(day)
         next :sem_atividade if report.vazio? && estado.nil?
         # Comparar ANTES de ler a página: o caminho de "nada mudou" (a maioria
         # dos ciclos) não faz nenhum request.
@@ -82,15 +89,16 @@ module Tracking
     # Só roda por rake, nunca pelo scheduler — é destrutiva. Antes de tocar no
     # Notion, grava o texto atual em storage/tracking/brag_<dia>.bak.
     def adopt(day)
-      secao = @page_days.section(day)
+      secao = page_days.section(day)
       if secao.nil? || secao.empty?
         @stdout.puts("Nenhuma seção em #{Renderers::BragBlocks.data_do_dia(day)} — o rebuild cria uma nova.")
         return 0
       end
 
-      backup(day, secao.blocks)
-      @ledger.record(day, header_id: secao.header_id,
-                          blocks: secao.body.map { |b| { id: b.fetch("id") } })
+      caminho = Tracker::Brag::Backup.section(day, secao.blocks)
+      @stdout.puts("Backup: #{caminho}")
+      ledger.record(day, header_id: secao.header_id,
+                         blocks: secao.body.map { |b| { id: b.fetch("id") } })
       @stdout.puts("Seção de #{Renderers::BragBlocks.data_do_dia(day)} adotada (#{secao.body.size} blocks). Backup em storage/tracking/.")
       secao.body.size
     end
@@ -100,10 +108,10 @@ module Tracking
     # (RepairBragOrder): a posse é a mesma, então quem sabe apagar é este
     # módulo — o chamador não repete o laço nem o resgate de erro.
     def forget(days)
-      @ledger.with_lock do
+      ledger.with_lock do
         days.each do |day|
-          apagar_do_dia(@ledger.day(day))
-          @ledger.forget(day)
+          apagar_do_dia(ledger.day(day))
+          ledger.forget(day)
         end
       end
       days.size
@@ -111,11 +119,19 @@ module Tracking
 
     private
 
+    def client = @client ||= Tracker::Notion::Client.from_env
+
+    def page_id = @page_id ||= ENV.fetch("TRACER_NOTION_BRAG_PAGE_ID")
+
+    def ledger = @ledger ||= Tracker::Brag::BlockLedger.new(page_id:)
+
+    def page_days = @page_days ||= Tracker::Notion::PageDays.new(client:, page_id:)
+
     # Caminho de escrita: com a página lida uma única vez, decide os ids da
     # seção (header, sentinel), apaga o que é nosso e escreve de novo.
     def rewrite_section(day, report, blocos, assinaturas, estado)
-      blocks = @page_days.blocks
-      secao = @page_days.section(day, blocks:)
+      blocks = page_days.blocks
+      secao = page_days.section(day, blocks:)
 
       header_id = estado&.dig(:header_id) || secao&.header_id
       # Sentinel é POR DIA: procurado só dentro da seção. Sem isso, o dia novo
@@ -138,8 +154,8 @@ module Tracking
 
       apagar(ids_apagar)
       criados = escrever(blocos, after: sentinel_id)
-      @ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
-                          blocks: pares(criados, assinaturas))
+      ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
+                         blocks: pares(criados, assinaturas))
     end
 
     # Sentinel do dia já presente na seção (o ledger pode não ter o id se uma
@@ -151,9 +167,9 @@ module Tracking
       secao.body.find { |block| sentinel?(block) }&.fetch("id")
     end
 
-    # É o parágrafo que avisa que o trecho abaixo é gerado? A convenção inteira
-    # de posse depende desta resposta, então ela mora aqui e não é recopiada
-    # por quem precisa dela (ver RepairBragOrder).
+    # É o parágrafo que avisa que o trecho abaixo é gerado? A convenção
+    # inteira de posse depende desta resposta, então ela mora aqui — quem
+    # precisar dela pergunta a este módulo, não reimplementa o predicado.
     def sentinel?(block)
       Tracker::Notion::PageDays.block?(block, "paragraph") &&
         Tracker::Notion::PageDays.text_of(block).include?(Renderers::BragBlocks::SENTINEL)
@@ -168,7 +184,7 @@ module Tracking
     # que é o caso do backfill de um dia mais antigo que todos. Se não existe
     # dia mais novo (página vazia, ou o dia é o mais recente), entra no topo.
     def posicao_da_secao(day, blocks)
-      secoes = @page_days.sections(blocks:)
+      secoes = page_days.sections(blocks:)
       vizinho = secoes.map(&:day).compact.select { |d| d > day.to_date }.min
       return { position: { type: "start" } } if vizinho.nil?
 
@@ -190,8 +206,8 @@ module Tracking
       return [] if ids.empty?
 
       @logger.warn("[tracking] ledger ausente para #{day.iso8601}: adotando #{ids.size} block(s) da seção")
-      @ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
-                          blocks: ids.map { |id| { id: id } })
+      ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
+                         blocks: ids.map { |id| { id: id } })
       ids
     end
 
@@ -225,7 +241,7 @@ module Tracking
     end
 
     def criar(bloco, after: nil, position: nil)
-      @client.append_block_children(@page_id, [ bloco ], after:, position:).fetch("results").first.fetch("id")
+      client.append_block_children(page_id, [ bloco ], after:, position:).fetch("results").first.fetch("id")
     end
 
     # Apaga só o que é nosso. `delete_block` trata 404 como sucesso (o bloco
@@ -238,7 +254,7 @@ module Tracking
 
     def apagar(ids)
       ids.each do |id|
-        @client.delete_block(id)
+        client.delete_block(id)
       rescue Tracker::Notion::ApiError => e
         @logger.warn("[tracking] não deu para apagar block #{id}: #{e.message}")
       end
@@ -250,23 +266,12 @@ module Tracking
     def escrever(blocos, after:)
       ids = []
       blocos.each_slice(LOTE_DE_BLOCKS) do |lote|
-        resposta = @client.append_block_children(@page_id, lote, after:)
+        resposta = client.append_block_children(page_id, lote, after:)
         novos = Array(resposta["results"]).map { |b| b.fetch("id") }
         ids.concat(novos)
         after = novos.last
       end
       ids
-    end
-
-    # Um bloco por linha: tipo + texto. O leitor quer o conteúdo antigo
-    # legível para colar em outro lugar se precisar.
-    def backup(day, blocos)
-      dir = Rails.root.join("storage/tracking")
-      FileUtils.mkdir_p(dir)
-      caminho = dir.join("brag_#{day.iso8601}.bak")
-      texto = blocos.map { |b| "#{b.fetch('type')}: #{Tracker::Notion::PageDays.text_of(b)}" }.join("\n")
-      File.write(caminho, texto)
-      @stdout.puts("Backup: #{caminho}")
     end
   end
 end

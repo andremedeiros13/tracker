@@ -21,8 +21,10 @@ API de blocks — ADR 0001).
   task); `CollectMovedIssues`/`CollectPullRequests` (coletas dentro dos adapters)
 - **Módulo da seção**: `Tracking::BragDocument` — recebe o `DayReport` e cuida
   de header, sentinel, ledger, lock e escrita. O chamador não monta bloco nem
-  consulta o ledger: a interface é `rewrite(day, report)` / `adopt(day)` /
-  `forget(days)`
+  consulta o ledger: a interface é `rewrite(day, report)` / `preview(day,
+  report)` / `adopt(day)` / `forget(days)`. O `preview` é a mesma copy em
+  texto — o dono do formato responde pelas duas formas, e o `dry_run` do
+  `RebuildDayReport` não tem traversal próprio
 - **O que o adapter entrega é entity, não payload**: `JiraDayRepository`
   devolve `Entities::Card` e `Entities::Activity` — `mine` já resolvido, sem
   `fields`/`status_category`/`accountId`. É o mesmo contrato do

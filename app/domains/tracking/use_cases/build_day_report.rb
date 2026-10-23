@@ -25,8 +25,14 @@ module Tracking
         prs = github.pull_requests
         por_key = prs.index_by { |pr| key_do_pr(pr) }
 
-        cards = jira.cards.select { |card| participou?(card, jira, day) }
-        itens = cards.map { |card| item_do_card(card, jira, day, por_key) }
+        # Uma pergunta só por card ("o que eu fiz nele hoje"), respondida uma
+        # vez e reusada por participação, transições, instante e comentários.
+        # Antes eram quatro predicados consultando as atividades de novo, e
+        # os quatro precisavam concordar sobre a mesma regra.
+        atividades = jira.cards.index_with { |card| AtividadeDoDia.new(card, jira, day) }
+
+        cards = jira.cards.select { |card| atividades[card].participou? }
+        itens = cards.map { |card| item_do_card(card, atividades[card], por_key) }
                      .reject { |item| sem_conteudo?(item) }
         itens.concat(prs_sem_card(prs, itens))
         # Review minha em PR de card que está no dia fica NA LINHA do card, não
@@ -47,28 +53,62 @@ module Tracking
 
       private
 
+      # A atividade do engenheiro num card, no dia. Objeto interno (não é
+      # interface do use case): a pergunta "eu participei deste card?" e as
+      # três métricas que a acompanham saem da mesma leitura das atividades.
+      AtividadeDoDia = Data.define(:card, :jira, :day) do
+        # O card entra no dia se eu movi o status ou comentei. O comentário
+        # não exige `no_dia?`: a janela do Jira já é curta e o comentário é meu
+        # de qualquer forma (é o que o filtro largo da varredura pega).
+        def participou? = moveu? || comentou?
+
+        # Transições de status do dia, na ordem — o que vira a cadeia.
+        def transicoes = minhas.select { |a| a.no_dia?(day) }.flat_map(&:status_pairs)
+
+        def ultima_atividade
+          todas.select { |a| a.no_dia?(day) }.map(&:at).max
+        end
+
+        def comentarios = todas.count { |a| a.comment? && a.mine }
+
+        private
+
+        def todas = jira.activities_for(card.key)
+
+        def minhas = todas.select { |a| a.changelog? && a.mine && a.touches_status? }
+
+        def moveu? = minhas.any? { |a| a.no_dia?(day) }
+
+        def comentou? = todas.any? { |a| a.comment? && a.mine }
+      end
+
       # Anexa as reviews dadas ao WorkItem do card correspondente (casando pela
       # key do PR revisado). Devolve [itens, reviews que ficaram sem card].
+      #
+      # Indexa as reviews pela key do PR revisado, como os PRs já eram
+      # indexados: antes o casamento era `select` dentro de `map`, rodando o
+      # regex de TicketKeys a cada par item × review e controlado por uma
+      # lista `usadas` — O(n²) com bookkeeping.
       def anexar_reviews_aos_cards(itens, reviews)
         return [ itens, reviews ] if reviews.empty?
 
-        usadas = []
-        atualizados = itens.map do |item|
-          dadas = reviews.reject { |r| usadas.include?(r) }.select { |review| mesma_key?(item, review) }
-          next item if dadas.empty?
+        por_key = reviews.group_by { |review| key_do_pr(review.pull_request) }
 
-          usadas.concat(dadas)
+        atualizados = itens.map do |item|
+          # Item sem card (PR avulso) não casa com nada — e `delete(nil)`
+          # engoliria as reviews de PR também sem key.
+          next item if item.key.nil?
+
+          dadas = por_key.delete(item.key)
+          next item if dadas.nil?
+
           # Guardo a review, não a linha pronta: a copy do documento é do
           # renderer, e o estado de domínio (`:approved`) só vira texto lá.
           item.with(reviews_given: dadas)
         end
-        [ atualizados, reviews - usadas ]
-      end
-
-      def mesma_key?(item, review)
-        return false if item.key.nil?
-
-        Parsers::TicketKeys.call(review.pull_request.title, review.pull_request.body).include?(item.key)
+        # O que sobrou no índice são as reviews de PR cujo card não entrou no
+        # dia — vão para a seção do fim.
+        [ atualizados, por_key.values.flatten ]
       end
 
       # Card em que só houve higiene de board (cadeia descartada) e nada mais:
@@ -77,24 +117,8 @@ module Tracking
         item.status_chain.empty? && item.pull_requests.empty? && item.comments_count.zero?
       end
 
-      # O card entra no dia se eu movi o status, comentei, ou ele é meu e teve
-      # atividade hoje.
-      def participou?(card, jira, day)
-        atividades = jira.activities_for(card.key)
-        movi = atividades.any? { |a| a.changelog? && a.mine && a.touches_status? && a.no_dia?(day) }
-        comentei = atividades.any? { |a| a.comment? && a.mine }
-        movi || comentei
-      end
-
-      def entradas_minhas(card, jira)
-        jira.activities_for(card.key).select do |atividade|
-          atividade.changelog? && atividade.mine && atividade.touches_status?
-        end
-      end
-
-      def item_do_card(card, jira, day, por_key)
+      def item_do_card(card, atividade, por_key)
         pr = por_key[card.key]
-        transicoes = transicoes_do_dia(card, jira, day)
         corpo = pr && @pull_request_body.call(pr.body)
 
         Entities::WorkItem.new(
@@ -104,16 +128,16 @@ module Tracking
           mine: card.mine,
           epic: card.epic,
           outcome: desfecho(card, pr),
-          outcome_at: pr&.merged_at || ultima_atividade(card, jira, day),
-          status_chain: @status_chain.call(transicoes),
+          outcome_at: pr&.merged_at || atividade.ultima_atividade,
+          status_chain: @status_chain.call(atividade.transicoes),
           owner_name: card.mine ? nil : card.assignee_name,
           pull_requests: [ pr ].compact,
           reviews_received: pr&.approvals.to_a,
           reviews_given: [],
-          comments_count: comentarios_meus(card, jira),
+          comments_count: atividade.comentarios,
           problema: corpo&.fetch(:problema),
           solucao: corpo&.fetch(:solucao),
-          last_activity_at: ultima_atividade(card, jira, day)
+          last_activity_at: atividade.ultima_atividade
         )
       end
 
@@ -126,21 +150,6 @@ module Tracking
         return :done if card.done?
 
         :in_progress
-      end
-
-      def transicoes_do_dia(card, jira, day)
-        entradas_minhas(card, jira)
-          .select { |atividade| atividade.no_dia?(day) }
-          .flat_map(&:status_pairs)
-      end
-
-      def ultima_atividade(card, jira, day)
-        instantes = jira.activities_for(card.key).select { |a| a.no_dia?(day) }.map(&:at)
-        instantes.max
-      end
-
-      def comentarios_meus(card, jira)
-        jira.activities_for(card.key).count { |a| a.comment? && a.mine }
       end
 
       # PR cujo card não entrou no dia (ou sem card): item próprio, para o
@@ -161,9 +170,7 @@ module Tracking
         end
       end
 
-      def key_do_pr(pr)
-        Parsers::TicketKeys.call(pr.title, pr.body).first
-      end
+      def key_do_pr(pr) = Parsers::TicketKeys.call(pr.title, pr.body).first
 
       # Só quando todos os itens do dia têm o mesmo épico — aí ele vai uma vez
       # no header, em vez de repetir em cada item.

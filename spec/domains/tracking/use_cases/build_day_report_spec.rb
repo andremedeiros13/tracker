@@ -126,7 +126,9 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
     it "PR sem card vira item próprio" do
       report = use_case.call(dia, github: github_day(pull_requests: [ pr(title: "chore: sem ticket", number: 42) ]))
 
-      expect(report.work_items.map(&:referencia)).to eq([ "PR #42" ])
+      item = report.work_items.first
+      expect(item.key).to be_nil
+      expect(item.pull_requests.map(&:number)).to eq([ 42 ])
     end
 
     it "aceita card cujo PR foi aberto noutro dia e mergeado hoje" do
@@ -175,9 +177,9 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
         "CHEKOUT-4" => [ transicao(de: "Review", para: "Done", id: "c4") ]
       }
 
-      referencia = use_case.call(dia, jira: jira_day(cards: cards, activities: changelog)).work_items.map(&:referencia)
+      chaves = use_case.call(dia, jira: jira_day(cards: cards, activities: changelog)).work_items.map(&:key)
 
-      expect(referencia).to eq([ "#4", "#3", "#2", "#1" ])
+      expect(chaves).to eq(%w[CHEKOUT-4 CHEKOUT-3 CHEKOUT-2 CHEKOUT-1])
     end
 
     it "dia sem nada devolve relatório vazio" do
