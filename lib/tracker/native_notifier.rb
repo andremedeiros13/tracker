@@ -7,13 +7,25 @@ module Tracker
   #
   #   notify-send (Linux) | osascript -e 'display notification ...' (macOS)
   #   PowerShell toast (Windows)
+  #
+  # Devolve true quando o comando foi disparado com sucesso e false quando o
+  # sistema operacional não tem um comando (ou o comando falhou). Antes o
+  # retorno de `system` era descartado e um SO não reconhecido devolvia nil sem
+  # nenhum log — a notificação, que é o produto, podia simplesmente não
+  # acontecer. Quem chama decide o que fazer com o false (o ciclo loga).
   class NativeNotifier
+    # `runner` é o shell-out; `host_os` decide a plataforma. Injetados para o
+    # teste não precisar disparar um toast de verdade nem fingir RbConfig.
+    def initialize(runner: nil, host_os: nil)
+      @runner = runner || ->(*comando) { system(*comando) }
+      @host_os = host_os
+    end
+
     def notify(title, body)
-      case platform
-      when :linux   then system("notify-send", title, body)
-      when :macos   then system("osascript", "-e", "display notification \"#{body}\" with title \"#{title}\"")
-      when :windows then windows_toast(title, body)
-      end
+      comando = comando_para(title, body)
+      return false if comando.nil?
+
+      @runner.call(*comando) ? true : false
     end
 
     # Notificação de teste na primeira execução (bin/setup) — o usuário concede
@@ -22,18 +34,28 @@ module Tracker
       new.notify("Tracker", "Notificações funcionando! O Tracker vai lembrar você das pendências.")
     end
 
-    private
-
     def platform
-      @platform ||= case RbConfig::CONFIG["host_os"]
+      @platform ||= case host_os
       when /linux/   then :linux
       when /darwin/  then :macos
       when /mswin|mingw|cygwin/ then :windows
       end
     end
 
-    def windows_toast(title, body)
-      script = <<~PS
+    private
+
+    def host_os = @host_os || RbConfig::CONFIG["host_os"]
+
+    def comando_para(title, body)
+      case platform
+      when :linux   then [ "notify-send", title, body ]
+      when :macos   then [ "osascript", "-e", "display notification \"#{body}\" with title \"#{title}\"" ]
+      when :windows then [ "powershell", "-NoProfile", "-Command", toast_powershell(title, body) ]
+      end
+    end
+
+    def toast_powershell(title, body)
+      <<~PS
         [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
         $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
         $text = $template.GetElementsByTagName("text")
@@ -42,7 +64,6 @@ module Tracker
         $toast = [Windows.UI.Notifications.ToastNotification]::new($template)
         [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Tracker").Show($toast)
       PS
-      system("powershell", "-NoProfile", "-Command", script)
     end
   end
 end

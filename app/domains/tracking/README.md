@@ -16,15 +16,22 @@ API de blocks — ADR 0001).
 - **Commits e PRs do GitHub**: `is:pr author:@me`, `is:pr reviewed-by:@me` + datas;
   reviews via `GET /repos/{owner}/{repo}/pulls/{n}/reviews` (filtro client-side por
   `user.login` — não existe endpoint "reviews by user")
-- **Use cases**: `RebuildDayReport` (o ciclo — coleta, agrega e manda o Brag
-  reescrever), `BuildDayReport` (regra pura do dia), `DiscoverReviewer` (rake
-  task); `CollectMovedIssues`/`CollectPullRequests` (coletas dentro dos adapters)
+- **Use cases**: `ColetaDoDia` (Jira + GitHub, cada fonte resgatada em
+  separado; devolve o dia E se ele está completo), `RebuildDayReport` (o ciclo
+  — coleta, agrega e manda o Brag reescrever), `BuildDayReport` (regra pura do
+  dia), `DiscoverReviewer` (rake task); `CollectMovedIssues`/`CollectPullRequests`
+  (coletas dentro dos adapters)
+- **Dia incompleto não é publicado**: se uma fonte falha, `RebuildDayReport`
+  loga e não reescreve o dia. Antes a falha virava dia vazio e o rewrite
+  apagava do Brag a metade que veio do adapter que funcionou
 - **Módulo da seção**: `Tracking::BragDocument` — recebe o `DayReport` e cuida
   de header, sentinel, ledger, lock e escrita. O chamador não monta bloco nem
   consulta o ledger: a interface é `rewrite(day, report)` / `preview(day,
-  report)` / `adopt(day)` / `forget(days)`. O `preview` é a mesma copy em
-  texto — o dono do formato responde pelas duas formas, e o `dry_run` do
-  `RebuildDayReport` não tem traversal próprio
+  report)` / `adopt(day)` / `repair_order(days:, apply:, rebuild:)`. O `preview`
+  é a mesma copy em texto — o dono do formato responde pelas duas formas, e o
+  `dry_run` do `RebuildDayReport` não tem traversal próprio. A migração de
+  ordem mora aqui porque é a mesma posse: lock, backup e "só apaga o que é
+  nosso"
 - **O que o adapter entrega é entity, não payload**: `JiraDayRepository`
   devolve `Entities::Card` e `Entities::Activity` — `mine` já resolvido, sem
   `fields`/`status_category`/`accountId`. É o mesmo contrato do
@@ -37,9 +44,15 @@ API de blocks — ADR 0001).
   (`:approved`); `Renderers::BragBlocks` traduz para "Aprovado" e falha alto em
   estado desconhecido. O mesmo vale para a linha de review anexada a um card:
   o `WorkItem` guarda as reviews, não o texto delas
+- **A forma do bloco é do `Tracker::Notion::Blocks`**: o renderer do Brag e o
+  repositório do 1-on-1 constroem blocos pelo mesmo módulo, e `PageDays.text_of`
+  lê por ele. Antes a forma era montada duas vezes (e lida com um leitor
+  defensivo que aceitava os dois dialetos, `plain_text` da API e `text.content`
+  do renderer)
 - **Leitura da seção**: `Tracker::Notion::PageDays#section(day)` devolve
-  `Section` (`day`, `header_id`, `body`, `body_ids`, `last_id`), não blocos.
-  `PageDays.day_of`/`.text_of`/`.marker` são funções de módulo — o formato de
+  `Section` (`day`, `header_id`, `blocks`, `body`, `last_id`, `empty?`), não
+  blocos. `PageDays.day_of`/`.text_of`/`.marker` são funções de módulo — o
+  formato de
   data e a extração de texto existem uma vez só, para o Brag e o 1-on-1
 - **Append no Brag document**: reconstrução com dedup — a cada ciclo a seção do
   dia é reescrita inteira (o valor do dia só se conhece quando ele acaba);

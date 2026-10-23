@@ -9,7 +9,11 @@ ficam os termos que atravessam mais de um domínio.
 - **To-Do (Tarefa)** — unidade de pendência, com origem e estado. Ver
   `app/domains/todos/CONTEXT.md`.
 - **Fila de atenção** — o board de To-Dos agrupado por Status; pendências
-  ordenadas pelo que vence primeiro.
+  ordenadas pelo que vence primeiro. A regra de o que é pendência agora e em
+  que ordem vive em `Todos::FilaDeAtencao` (o adapter só devolve as candidatas).
+- **Dia completo** (`Tracking::UseCases::ColetaDoDia`) — o resultado de coletar
+  Jira + GitHub: um dia E a informação de se alguma fonte falhou. Dia
+  incompleto não é publicado no Brag — reescrever apagaria a metade que veio.
 - **Entrega** — o que conta como trabalho feito no dia: card movido por mim,
   PR mergeado, review dada. A regra vive em `Tracking::UseCases::BuildDayReport`.
 - **Card** (`Tracking::Entities::Card`) — um card do Jira já normalizado. O
@@ -65,16 +69,28 @@ Vocabulário de *deep modules* usado nas decisões deste repo.
   (não dependem da page). Só leitura: posse de escrita continua com cada
   repositório.
 - `Tracking::BragDocument#rewrite(day, report)` / `#preview(day, report)` /
-  `#adopt(day)` / `#forget(days)` — a seção do dia nas duas formas (blocos do
-  Notion e texto do preview), incluindo o que é nosso apagar. O sentinel é
-  conhecido aqui (`sentinel?`), não recopiado por quem precisa dele.
+  `#adopt(day)` / `#repair_order(days:, apply:, rebuild:)` — a seção do dia
+  nas duas formas (blocos do Notion e texto do preview), incluindo o que é
+  nosso apagar. O sentinel é conhecido aqui (`sentinel?`), não recopiado por
+  quem precisa dele. `repair_order` mora aqui porque é a mesma posse: lock,
+  backup e "só apaga o que é nosso".
+- `Tracker::Notion::Blocks` — a forma de um bloco do Notion: construtores
+  (`heading`, `paragrafo`, `bullet`, `run`) e leitor (`texto_de`, `tipo_de`,
+  `heading?`). Quem escreve não escolhe o dialeto e quem lê não adivinha.
 - `Tracker::Brag::Backup.section(day, blocks, suffix:)` — dump em texto de uma
   seção antes de operação destrutiva; o formato do backup existe uma vez.
 - `Tracker::Notion::Client` — transporte. Toda operação recebe o id do
   recurso (`query_database(database_id)`, `retrieve_database(database_id)`);
   quem conhece o recurso é o repositório do domínio.
+- `Tracker::NativeNotifier#notify` — devolve `true`/`false`: uma notificação que
+  não sai é falha visível, não silêncio.
 - `Todos::Repositories::NotionSchema.name_of(role)` / `.label_of(role, value)` /
   `.value_of(role, label)` — propriedades por papel de domínio (`:status`,
   `:origin`, `:snoozed`); o nome literal do Notion existe uma vez só.
 - `Todos::Repositories::TodoDatabase#notification_candidates` / `#create(title,
   origin:)` — o database To-Dos; leitura e escrita derivam do `NotionSchema`.
+  O adapter só lê: devolve as candidatas cruas, sem filtrar nem ordenar.
+- `Todos::FilaDeAtencao.de(todos)` — o que é pendência agora e em que ordem
+  (FIFO pelo instante em que a tarefa entrou na fila). Código puro, testável
+  sem Notion; antes a ordenação morava no adapter e era recopiada no fake do
+  spec.

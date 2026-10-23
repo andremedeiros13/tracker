@@ -63,6 +63,29 @@ RSpec.describe Tracker::Scheduler do
     end
   end
 
+  describe ".from_env" do
+    it "monta os quatro jobs com as janelas do ENV" do
+      scheduler = described_class.from_env
+      jobs = scheduler.instance_variable_get(:@jobs)
+
+      expect(jobs.map(&:nome)).to eq(%i[notify tracking jira_sweep one_on_ones])
+      # A fiação é o que o spec antigo nunca exercitava: um typo numa variável
+      # mudava a cadência em silêncio.
+      expect(jobs.map { |j| j.instance_variable_get(:@janela) }).to all(be_a(Tracker::Scheduler::Janela))
+    end
+
+    it "respeita as variáveis de janela e intervalo" do
+      with_env("TRACER_NOTIFY_ACTIVE_START" => "10:00",
+               "TRACER_NOTIFY_ACTIVE_END" => "11:00",
+               "TRACER_NOTIFY_INTERVAL_MINUTES" => "15") do
+        notify = described_class.from_env.instance_variable_get(:@jobs).first
+
+        expect(notify.due?(Time.zone.local(2026, 10, 21, 9, 59))).to be(false)
+        expect(notify.due?(Time.zone.local(2026, 10, 21, 10, 0))).to be(true)
+      end
+    end
+  end
+
   describe "#tick" do
     it "roda só os jobs devidos" do
       rodou = []
@@ -95,5 +118,13 @@ RSpec.describe Tracker::Scheduler do
 
       expect(logger).not_to have_received(:info)
     end
+  end
+
+  def with_env(vars)
+    anteriores = vars.to_h { |k, v| [ k.to_s, ENV[k.to_s] ] }
+    vars.each { |k, v| ENV[k.to_s] = v }
+    yield
+  ensure
+    anteriores.each { |k, v| ENV[k] = v }
   end
 end
