@@ -15,11 +15,16 @@ module Tracking
     # Os qualificadores de data do GitHub são UTC: buscamos de dia-1 e cortamos
     # client-side em Time.zone, senão um merge às 21:30 BRT cai no dia seguinte.
     class GitHubDayRepository
+      # Estado do GitHub → estado de domínio. O adapter NÃO traduz para a copy
+      # do documento: quem decide o que o leitor vê é o renderer, dono do
+      # formato do Brag. Antes este mapa devolvia "Aprovado" e o renderer
+      # mantinha outro mapa para os mesmos estados — dois vocabulários para um
+      # conceito, em duas camadas.
       ESTADOS_DE_REVIEW = {
-        "APPROVED" => "Aprovado",
-        "CHANGES_REQUESTED" => "Mudanças solicitadas",
-        "COMMENTED" => "Comentou",
-        "DISMISSED" => "Review dispensada"
+        "APPROVED" => :approved,
+        "CHANGES_REQUESTED" => :changes_requested,
+        "COMMENTED" => :commented,
+        "DISMISSED" => :dismissed
       }.freeze
 
       PESO_DA_REVIEW = { "APPROVED" => 3, "CHANGES_REQUESTED" => 2, "COMMENTED" => 1, "DISMISSED" => 0 }.freeze
@@ -120,7 +125,7 @@ module Tracking
               number: pr.fetch("number"), title: pr.fetch("title"), url: pr.fetch("html_url"),
               repo: repositorio_de(pr), created_at: Time.zone.parse(pr.fetch("created_at"))
             ),
-            state: ESTADOS_DE_REVIEW.fetch(review["state"], review["state"]),
+            state: ESTADOS_DE_REVIEW.fetch(review["state"]) { raise KeyError, "estado de review desconhecido: #{review["state"].inspect}" },
             submitted_at: Time.zone.parse(review.fetch("submitted_at"))
           )
         end

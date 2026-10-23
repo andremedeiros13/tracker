@@ -17,10 +17,7 @@ module Todos
       # Labels do Notion que o ciclo considera — derivados do schema (fonte
       # única), não literais: `pendente` (a notificar) e `snoozed` ("Em
       # andamento", porque ainda está na fila até ser concluída).
-      STATUS_NOTIFICAVEIS = begin
-        labels = NotionSchema::PROPERTIES.fetch("Status").fetch(:options).invert
-        %i[pendente snoozed].map { |valor| labels.fetch(valor) }.freeze
-      end
+      STATUS_NOTIFICAVEIS = %i[pendente snoozed].map { |valor| NotionSchema.label_of(:status, valor) }.freeze
 
       def initialize(client: Tracker::Notion::Client.from_env,
                      mapper: PropertyMapper.new,
@@ -46,9 +43,9 @@ module Todos
         @client.create_page(
           database_id: @database_id,
           properties: {
-            "Name" => { title: [ { text: { content: title } } ] },
-            "Status" => { status: { name: label_de("Status", :pendente) } },
-            "Origem" => { select: { name: label_de("Origem", origin) } }
+            NotionSchema.name_of(:name) => { title: [ { text: { content: title } } ] },
+            NotionSchema.name_of(:status) => { status: { name: NotionSchema.label_of(:status, :pendente) } },
+            NotionSchema.name_of(:origin) => { select: { name: NotionSchema.label_of(:origin, origin) } }
           }
         )
       end
@@ -56,14 +53,7 @@ module Todos
       private
 
       def filtro_de_status
-        { or: STATUS_NOTIFICAVEIS.map { |nome| { property: "Status", status: { equals: nome } } } }
-      end
-
-      # Label do Notion a partir do valor de domínio. Falha alto quando o valor
-      # não existe no schema — o mesmo erro que o mapper dá na leitura.
-      def label_de(propriedade, valor)
-        opcoes = NotionSchema::PROPERTIES.fetch(propriedade).fetch(:options)
-        opcoes.key(valor) || raise(KeyError, "opção #{valor.inspect} não existe em #{propriedade}")
+        { or: STATUS_NOTIFICAVEIS.map { |nome| { property: NotionSchema.name_of(:status), status: { equals: nome } } } }
       end
     end
   end

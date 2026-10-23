@@ -10,6 +10,11 @@ module Tracking
     # vazava até o BuildDayReport, que carregava dois shims defensivos; aqui ela
     # morre no adapter.
     #
+    # `mine` e não `author_id`: o domínio só precisa saber se a atividade é do
+    # engenheiro, e quem sabe a identidade dele é o adapter. Guardar o autor
+    # cru obrigava o domínio a receber o mesmo account id que o adapter já
+    # tinha resolvido — duas camadas decidindo a mesma coisa.
+    #
     # `status_items` são só os itens de status do changelog — `from`/`to` vêm
     # nil quando o Jira não informa o lado (card criado já numa coluna). Esse
     # nil é semântica do Jira, não detalhe de transporte, então fica na entity:
@@ -17,15 +22,13 @@ module Tracking
     # transições completas (o que vira a cadeia do Brag).
     # `kind` separa comentário de entrada de changelog: sem isso, um changelog
     # que só mudou a descrição seria contado como "eu comentei".
-    Activity = Data.define(:kind, :author_id, :at, :status_items) do
-      def initialize(kind:, at:, author_id: nil, status_items: [], **resto)
-        super(kind:, author_id:, at:, status_items: Array(status_items), **resto)
+    Activity = Data.define(:kind, :mine, :at, :status_items) do
+      def initialize(kind:, at:, mine: false, status_items: [], **resto)
+        super(kind:, mine:, at:, status_items: Array(status_items), **resto)
       end
 
       def comment? = kind == :comment
       def changelog? = kind == :changelog
-
-      def mine?(account_id) = author_id == account_id
 
       def touches_status? = status_items.any?
 

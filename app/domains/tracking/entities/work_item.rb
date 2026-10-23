@@ -6,6 +6,11 @@ module Tracking
     # — não o evento de API: um card movido 3 vezes é UM item com a cadeia de
     # status comprimida, não 3 bullets.
     #
+    # `reviews_given` guarda as reviews (Entities::GivenReview), não linhas de
+    # texto: a copy que aparece no documento é do renderer, dono do formato.
+    # Guardar a linha pronta aqui fazia o estado de review ser traduzido no
+    # domínio e no renderer.
+    #
     # `outcome`:
     #   :merged      — PR mergeado hoje (o mais forte; vence status)
     #   :done        — statusCategory "done" no Jira

@@ -15,6 +15,8 @@ RSpec.describe Tracker::Notion::PageDays do
     bloco(id:, type: "heading_2", texto:)
   end
 
+  def ids(secao) = secao.body.map { |b| b.fetch("id") }
+
   before do
     allow(client).to receive(:block_children).and_return([
       header(id: "h1", texto: "20/10/2026 — terça"),
@@ -28,8 +30,12 @@ RSpec.describe Tracker::Notion::PageDays do
   end
 
   describe "#section" do
-    it "coleta header + blocos do dia, parando no próximo header" do
-      expect(page_days.section(dia).map { |b| b.fetch("id") }).to eq(%w[h2 b1 b2])
+    it "entrega a seção do dia: header e body até o próximo header" do
+      secao = page_days.section(dia)
+
+      expect(secao.header_id).to eq("h2")
+      expect(secao.day).to eq(dia)
+      expect(ids(secao)).to eq(%w[b1 b2])
     end
 
     it "funciona em página decrescente (a seção termina no dia ANTERIOR)" do
@@ -40,81 +46,85 @@ RSpec.describe Tracker::Notion::PageDays do
         bloco(id: "b-ontem")
       ])
 
-      expect(page_days.section(dia).map { |b| b.fetch("id") }).to eq(%w[h2 b1])
+      secao = page_days.section(dia)
+
+      expect(secao.header_id).to eq("h2")
+      expect(ids(secao)).to eq(%w[b1])
     end
 
     it "aceita uma leitura já feita em `blocks:` (sem ir ao client)" do
       leitura = [ header(id: "h2", texto: "21/10/2026 — quarta"), bloco(id: "b1") ]
 
-      expect(page_days.section(dia, blocks: leitura).map { |b| b.fetch("id") }).to eq(%w[h2 b1])
+      expect(ids(page_days.section(dia, blocks: leitura))).to eq(%w[b1])
       expect(client).not_to have_received(:block_children)
     end
 
-    it "com prefixo: casa o header com dia da semana (formato do Brag)" do
-      expect(page_days.section(dia, prefixo: true).first.fetch("id")).to eq("h2")
-    end
-
-    it "exato: não casa header com sufixo extra (formato do 1-on-1)" do
-      expect(page_days.section(dia, prefixo: false)).to be_empty
-    end
-
-    it "dia sem seção devolve vazio" do
-      expect(page_days.section(Date.new(2020, 1, 1))).to be_empty
+    it "dia sem seção devolve nil" do
+      expect(page_days.section(Date.new(2020, 1, 1))).to be_nil
     end
   end
 
-  describe "#day_of / #section_days" do
-    it "lê a data do header, ignorando o sufixo (dia da semana e épico)" do
-      expect(page_days.day_of(header(texto: "21/10/2026 — quarta · [Motor][Wave2] Pagamento")))
-        .to eq(dia)
+  describe "#sections" do
+    it "lista as seções na ordem da página, cada uma com o seu dia" do
+      secoes = page_days.sections
+
+      expect(secoes.map(&:day)).to eq([ Date.new(2026, 10, 20), dia, Date.new(2026, 10, 22) ])
+      expect(secoes.map(&:header_id)).to eq(%w[h1 h2 h3])
     end
 
-    it "devolve nil para header sem data e para bloco que não é header" do
-      expect(page_days.day_of(header(texto: "sem data aqui"))).to be_nil
-      expect(page_days.day_of(bloco(id: "b1"))).to be_nil
+    it "ignora blocos antes do primeiro header" do
+      allow(client).to receive(:block_children).and_return([
+        bloco(id: "solta", texto: "sem seção"),
+        header(id: "h1", texto: "21/10/2026 — quarta"),
+        bloco(id: "b1")
+      ])
+
+      secoes = page_days.sections
+
+      expect(secoes.size).to eq(1)
+      expect(ids(secoes.first)).to eq(%w[b1])
     end
 
-    it "lista as datas na ordem em que aparecem na página" do
-      expect(page_days.section_days).to eq([ Date.new(2026, 10, 20), dia, Date.new(2026, 10, 22) ])
+    it "uma leitura só, para qualquer número de seções" do
+      page_days.sections
+
+      expect(client).to have_received(:block_children).once
     end
   end
 
   describe "#header_exists?" do
-    it "é verdadeiro para o header exato do dia" do
-      allow(client).to receive(:block_children).and_return([ header(texto: "21/10/2026") ])
-
+    it "é verdadeiro para o header do dia e falso para outro dia" do
       expect(page_days.header_exists?(dia)).to be(true)
-    end
-
-    it "não confunde o header de outro dia" do
       expect(page_days.header_exists?(Date.new(2020, 1, 1))).to be(false)
     end
   end
 
-  describe "#ids_after" do
-    it "devolve os blocos abaixo do sentinel até o próximo header" do
-      allow(client).to receive(:block_children).and_return([
-        header,
-        bloco(id: "sentinel", type: "paragraph"),
-        bloco(id: "b1"), bloco(id: "b2"),
-        header(id: "h3", texto: "22/10/2026 — quinta"),
-        bloco(id: "b-amanha")
-      ])
+  describe ".day_of" do
+    it "lê a data do header, ignorando o sufixo (dia da semana e épico)" do
+      expect(described_class.day_of(header(texto: "21/10/2026 — quarta · [Motor][Wave2] Pagamento")))
+        .to eq(dia)
+    end
 
-      expect(page_days.ids_after(dia, "sentinel")).to eq(%w[b1 b2])
+    it "lê o header sem sufixo (formato do 1-on-1)" do
+      expect(described_class.day_of(header(texto: "21/10/2026"))).to eq(dia)
+    end
+
+    it "devolve nil para header sem data e para bloco que não é header" do
+      expect(described_class.day_of(header(texto: "sem data aqui"))).to be_nil
+      expect(described_class.day_of(bloco(id: "b1"))).to be_nil
     end
   end
 
-  describe "#text" do
+  describe ".text_of" do
     it "extrai plain_text do payload da API" do
-      expect(page_days.text(header)).to eq("21/10/2026 — quarta")
+      expect(described_class.text_of(header)).to eq("21/10/2026 — quarta")
     end
 
     it "também aceita rich_text no shape do renderer (chaves símbolo)" do
       bloco_renderer = { "type" => "paragraph",
                          "paragraph" => { rich_text: [ { text: { content: "olá" } } ] } }
 
-      expect(page_days.text(bloco_renderer)).to eq("olá")
+      expect(described_class.text_of(bloco_renderer)).to eq("olá")
     end
   end
 

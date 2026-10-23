@@ -78,14 +78,14 @@ module Tracking
         Entities::GitHubDay.new
       end
 
-      # Preview em texto (usado pelo rake e pelo TRACER_DRY_RUN) — permite ler
-      # o resultado real antes de qualquer escrita no Notion. Renderiza, não
-      # introspecta blocks: o mesmo caminho que escreveria.
+      # Preview em texto (usado pelo rake e pelo TRY_RUN) — permite ler o
+      # resultado real antes de qualquer escrita no Notion. Renderiza, não
+      # introspecta blocks: o mesmo caminho que escreveria, inclusive a
+      # decisão de "dia vazio", que é do renderer e não se repete aqui.
       def imprimir(day, report)
-        blocos = report.vazio? ? [ @renderer.sem_atividade ] : @renderer.items(report)
         @stdout.puts("== #{day.iso8601} ==")
         @stdout.puts("## #{texto_rich(@renderer.header(day, report.epic_note)[:heading_2])}")
-        blocos.each do |bloco|
+        @renderer.items(report).each do |bloco|
           tipo = bloco.fetch(:type).to_sym
           @stdout.puts("• #{texto_rich(bloco[tipo])}")
           Array(bloco[tipo][:children]).each { |filho| @stdout.puts("    - #{texto_rich(filho[filho.fetch(:type).to_sym])}") }

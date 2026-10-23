@@ -8,8 +8,7 @@ module Tracking
     # testável sem rede).
     #
     # `activities` é { "<KEY>" => [Entities::Activity, ...] }, ordenado por
-    # instante. O domínio não vê epoch ms, formato de author nem o shape cru do
-    # bulkfetch — só autor, instante e itens de status.
+    # instante. O domínio não vê epoch ms nem o shape cru do bulkfetch.
     JiraDay = Data.define(:cards, :activities) do
       def initialize(cards: [], activities: {}, **resto)
         super(cards: Array(cards), activities: activities, **resto)

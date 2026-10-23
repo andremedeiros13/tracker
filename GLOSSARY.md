@@ -12,13 +12,16 @@ ficam os termos que atravessam mais de um domínio.
   ordenadas pelo que vence primeiro.
 - **Entrega** — o que conta como trabalho feito no dia: card movido por mim,
   PR mergeado, review dada. A regra vive em `Tracking::UseCases::BuildDayReport`.
+- **Card** (`Tracking::Entities::Card`) — um card do Jira já normalizado. O
+  adapter resolve `mine`; o domínio não compara account ids. Ver
+  `app/domains/tracking/README.md`.
 - **Atividade** (`Tracking::Entities::Activity`) — uma entrada de changelog ou
-  um comentário de um card do Jira, já normalizada (autor, instante, itens de
-  status). É o que o adapter entrega ao domínio; o detalhe de transporte
-  (epoch ms, formato de author) não passa daqui.
+  um comentário de um card do Jira, já normalizada (é minha?, instante, itens
+  de status). É o que o adapter entrega ao domínio; o detalhe de transporte
+  (epoch ms, formato de author, accountId) não passa daqui.
 - **Relatório do dia** (`Tracking::Entities::DayReport`) — o dia agregado e
   ordenado, pronto para render: itens, reviews dadas, commits, épico comum.
-- **Seção do dia** (`Tracking::BragDocument`) — o trecho de uma page que
+- **Seção do dia** (`Tracking::Notion::Section`) — o trecho de uma page que
   pertence a um dia: header (`heading_2` com a data), sentinel e body. No Brag
   é reconstruída; no 1-on-1 só se appenda.
 - **Sentinel** — parágrafo que marca "daqui para baixo é gerado pelo Tracker".
@@ -54,9 +57,17 @@ Vocabulário de *deep modules* usado nas decisões deste repo.
 
 - `Tracker::HTTP.call(method:, url:, headers:, body:, query:, error:)` — política
   de transporte (timeouts, 429, erro) para Notion/Jira/GitHub.
-- `Tracker::Notion::PageDays#section(day)` / `text(block)` / `header_exists?` —
-  leitura de page com registros por dia (Brag e 1-on-1). Só leitura: posse de
-  escrita continua com cada repositório.
-- `Tracking::BragDocument#rewrite(day, report)` / `#adopt(day)` — a seção do dia.
+- `Tracker::Notion::PageDays#section(day)` / `#sections` — leitura de page com
+  registros por dia (Brag e 1-on-1). Devolve `Tracker::Notion::Section`
+  (`day`, `header_id`, `body`, `body_ids`, `last_id`), não blocos crus: quem
+  pergunta "qual é a seção do dia" não recombina predicados. `.day_of(block)`,
+  `.text_of(block)` e `.marker(day)` são funções de módulo (não dependem da
+  page). Só leitura: posse de escrita continua com cada repositório.
+- `Tracking::BragDocument#rewrite(day, report)` / `#adopt(day)` / `#forget(days)`
+  — a seção do dia, incluindo o que é nosso apagar. O sentinel é conhecido
+  aqui (`sentinel?`), não recopiado por quem precisa dele.
+- `Todos::Repositories::NotionSchema.name_of(role)` / `.label_of(role, value)` /
+  `.value_of(role, label)` — propriedades por papel de domínio (`:status`,
+  `:origin`, `:snoozed`); o nome literal do Notion existe uma vez só.
 - `Todos::Repositories::TodoDatabase#notification_candidates` / `#create(title,
   origin:)` — o database To-Dos; leitura e escrita derivam do `NotionSchema`.

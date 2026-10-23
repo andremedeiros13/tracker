@@ -39,7 +39,7 @@ RSpec.describe Tracking::Repositories::JiraDayRepository do
 
       atividade = repository.dia(dia).activities_for("CHEKOUT-1").first
 
-      expect(atividade).to have_attributes(kind: :changelog, author_id: "acc-eu")
+      expect(atividade).to have_attributes(kind: :changelog, mine: true)
       expect(atividade.at).to eq(Time.zone.parse("#{dia} 10:00"))
       expect(atividade.status_pairs).to eq([ [ "To Do", "In Progress" ] ])
     end
@@ -53,9 +53,15 @@ RSpec.describe Tracking::Repositories::JiraDayRepository do
 
       atividade = repository.dia(dia).activities_for("CHEKOUT-1").first
 
-      expect(atividade.author_id).to eq("acc-eu")
+      expect(atividade.mine).to be(true)
       expect(atividade.at).to eq(Time.zone.parse("#{dia} 10:00"))
       expect(atividade.status_pairs).to eq([ [ "Review", "Done" ] ])
+    end
+
+    it "atividade de outra pessoa não é minha" do
+      allow(client).to receive(:changelog_em_lote).and_return({ "id-1" => [ bulkfetch_entry(hora: "10:00", author: "acc-outro") ] })
+
+      expect(repository.dia(dia).activities_for("CHEKOUT-1").first.mine).to be(false)
     end
 
     it "inclui comentários como atividade, distinguidos do changelog" do
@@ -67,7 +73,7 @@ RSpec.describe Tracking::Repositories::JiraDayRepository do
       atividades = repository.dia(dia).activities_for("CHEKOUT-1")
 
       expect(atividades.map(&:kind)).to eq([ :comment ])
-      expect(atividades.first.author_id).to eq("acc-eu")
+      expect(atividades.first.mine).to be(true)
     end
 
     it "descarta itens de changelog que não são de status" do
@@ -100,15 +106,25 @@ RSpec.describe Tracking::Repositories::JiraDayRepository do
       expect(repository.dia(dia).activities_for("CHEKOUT-1").map(&:kind)).to eq([ :comment, :changelog ])
     end
 
-    it "normaliza o card: achata fields e resolve url do browse" do
+    it "normaliza o card: entrega entity, resolve url do browse e marca se é meu" do
       allow(client).to receive(:changelog_em_lote).and_return({})
 
       card_normalizado = repository.dia(dia).cards.first
 
-      expect(card_normalizado).to include(
-        "key" => "CHEKOUT-1", "title" => "Resumo", "status" => "Em andamento",
-        "assignee_id" => "acc-eu", "url" => "https://jira.example.com/browse/CHEKOUT-1"
+      expect(card_normalizado).to have_attributes(
+        key: "CHEKOUT-1", title: "Resumo", status: "Em andamento",
+        mine: true, assignee_name: "André",
+        url: "https://jira.example.com/browse/CHEKOUT-1"
       )
+    end
+
+    it "card de outra pessoa não é meu" do
+      allow(client).to receive(:changelog_em_lote).and_return({})
+      allow(client).to receive(:search).and_return([
+        card.tap { |c| c["fields"]["assignee"] = { "displayName" => "Itallo", "accountId" => "acc-itallo" } }
+      ])
+
+      expect(repository.dia(dia).cards.first.mine).to be(false)
     end
 
     it "sem cards não consulta changelog" do

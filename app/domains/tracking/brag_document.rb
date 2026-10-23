@@ -58,7 +58,7 @@ module Tracking
     #                    ciclo de 30 min sem novidade custar quase nada).
     #   :reescrito     — apagou o que era nosso e escreveu de novo.
     def rewrite(day, report)
-      blocos = report.vazio? ? [ @renderer.sem_atividade ] : @renderer.items(report)
+      blocos = @renderer.items(report)
       assinaturas = blocos.map { |bloco| Renderers::BragBlocks.signature(bloco) }
 
       # Lock entre processos: o daemon e um rake rodando junto (ou dois ticks
@@ -82,18 +82,31 @@ module Tracking
     # Só roda por rake, nunca pelo scheduler — é destrutiva. Antes de tocar no
     # Notion, grava o texto atual em storage/tracking/brag_<dia>.bak.
     def adopt(day)
-      blocos = @page_days.section(day)
-      if blocos.empty?
+      secao = @page_days.section(day)
+      if secao.nil? || secao.empty?
         @stdout.puts("Nenhuma seção em #{Renderers::BragBlocks.data_do_dia(day)} — o rebuild cria uma nova.")
         return 0
       end
 
-      backup(day, blocos)
-      header = blocos.find { |b| @page_days.header?(b) }
-      body = blocos.reject { |b| b.equal?(header) }
-      @ledger.record(day, header_id: header.fetch("id"), blocks: body.map { |b| { id: b.fetch("id") } })
-      @stdout.puts("Seção de #{Renderers::BragBlocks.data_do_dia(day)} adotada (#{body.size} blocks). Backup em storage/tracking/.")
-      body.size
+      backup(day, secao.blocks)
+      @ledger.record(day, header_id: secao.header_id,
+                          blocks: secao.body.map { |b| { id: b.fetch("id") } })
+      @stdout.puts("Seção de #{Renderers::BragBlocks.data_do_dia(day)} adotada (#{secao.body.size} blocks). Backup em storage/tracking/.")
+      secao.body.size
+    end
+
+    # Apaga da página todos os blocks que o ledger conhece, de qualquer dia.
+    # Usado pela migração que rearranja uma página fora de ordem
+    # (RepairBragOrder): a posse é a mesma, então quem sabe apagar é este
+    # módulo — o chamador não repete o laço nem o resgate de erro.
+    def forget(days)
+      @ledger.with_lock do
+        days.each do |day|
+          apagar_do_dia(@ledger.day(day))
+          @ledger.forget(day)
+        end
+      end
+      days.size
     end
 
     private
@@ -104,7 +117,7 @@ module Tracking
       blocks = @page_days.blocks
       secao = @page_days.section(day, blocks:)
 
-      header_id = estado&.dig(:header_id) || header_da_secao(secao)
+      header_id = estado&.dig(:header_id) || secao&.header_id
       # Sentinel é POR DIA: procurado só dentro da seção. Sem isso, o dia novo
       # pegava o sentinel do dia anterior e escrevia dentro da seção dele.
       sentinel_id = estado&.dig(:sentinel_id) || sentinel_da_secao(secao)
@@ -119,26 +132,31 @@ module Tracking
 
       # Sem ledger mas com sentinel, a seção é nossa: adota os blocos que já
       # estão lá a partir do sentinel (é o que impede o rebuild de
-      # ACRESCENTAR uma cópia quando o ledger some/é apagado).
-      adotar_sem_ledger(day, estado, header_id, sentinel_id) if estado.nil?
+      # ACRESCENTAR uma cópia quando o ledger some/é apagado). A adoção
+      # devolve os ids; não relê o ledger para descobri-los.
+      ids_apagar = estado ? Array(estado[:blocks]).map { |b| b[:id] } : adotar_sem_ledger(day, header_id, sentinel_id, secao)
 
-      apagar_do_dia(@ledger.day(day))
+      apagar(ids_apagar)
       criados = escrever(blocos, after: sentinel_id)
       @ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
                           blocks: pares(criados, assinaturas))
-    end
-
-    # Header do dia já presente na página (ledger perdido), procurado na seção.
-    def header_da_secao(secao)
-      secao.find { |block| @page_days.header?(block) }&.fetch("id")
     end
 
     # Sentinel do dia já presente na seção (o ledger pode não ter o id se uma
     # escrita falhou no meio). Antes procurava na página inteira e pegava o de
     # outro dia.
     def sentinel_da_secao(secao)
-      secao.select { |b| @page_days.block?(b, "paragraph") && @page_days.text(b).include?(Renderers::BragBlocks::SENTINEL) }
-           .first&.fetch("id")
+      return nil if secao.nil?
+
+      secao.body.find { |block| sentinel?(block) }&.fetch("id")
+    end
+
+    # É o parágrafo que avisa que o trecho abaixo é gerado? A convenção inteira
+    # de posse depende desta resposta, então ela mora aqui e não é recopiada
+    # por quem precisa dela (ver RepairBragOrder).
+    def sentinel?(block)
+      Tracker::Notion::PageDays.block?(block, "paragraph") &&
+        Tracker::Notion::PageDays.text_of(block).include?(Renderers::BragBlocks::SENTINEL)
     end
 
     # Argumentos de posicionamento para o header de uma seção nova, mantendo a
@@ -150,28 +168,46 @@ module Tracking
     # que é o caso do backfill de um dia mais antigo que todos. Se não existe
     # dia mais novo (página vazia, ou o dia é o mais recente), entra no topo.
     def posicao_da_secao(day, blocks)
-      vizinho = @page_days.section_days(blocks:).select { |d| d > day.to_date }.min
+      secoes = @page_days.sections(blocks:)
+      vizinho = secoes.map(&:day).compact.select { |d| d > day.to_date }.min
       return { position: { type: "start" } } if vizinho.nil?
 
-      ultimo = @page_days.section(vizinho, blocks:).last
+      ultimo = secoes.find { |secao| secao.day == vizinho }&.last_id
       return { position: { type: "start" } } if ultimo.nil?
 
-      { position: { type: "after_block", after_block: { id: ultimo.fetch("id") } } }
+      { position: { type: "after_block", after_block: { id: ultimo } } }
     end
 
     # Seção nossa (tem sentinel) mas o ledger sumiu: os blocos abaixo do
     # sentinel, até o próximo header, passam a ser propriedade nossa e serão
     # reescritos. O que estiver abaixo do sentinel é, por contrato, gerado —
     # quem escreve à mão escreve ANTES do sentinel ou num bloco próprio.
-    def adotar_sem_ledger(day, estado, header_id, sentinel_id)
-      return if estado
-
-      ids = @page_days.ids_after(day, sentinel_id)
-      return if ids.empty?
+    #
+    # Devolve os ids a apagar (em vez de gravar no ledger e obrigar quem chama
+    # a reler o arquivo 40 linhas depois).
+    def adotar_sem_ledger(day, header_id, sentinel_id, secao)
+      ids = ids_abaixo_do_sentinel(secao, sentinel_id)
+      return [] if ids.empty?
 
       @logger.warn("[tracking] ledger ausente para #{day.iso8601}: adotando #{ids.size} block(s) da seção")
       @ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
                           blocks: ids.map { |id| { id: id } })
+      ids
+    end
+
+    # Ids dos blocos da seção que ficam abaixo do sentinel. Escopado à seção:
+    # um sentinel de outro dia não pode fazer a adoção cair na seção dele.
+    def ids_abaixo_do_sentinel(secao, sentinel_id)
+      return [] if secao.nil? || sentinel_id.nil?
+
+      viu = false
+      secao.blocks.each_with_object([]) do |block, ids|
+        if block.fetch("id") == sentinel_id
+          viu = true
+        elsif viu
+          ids << block.fetch("id")
+        end
+      end
     end
 
     # Liga id criado → assinatura do bloco que o originou. `zip` (não
@@ -192,14 +228,19 @@ module Tracking
       @client.append_block_children(@page_id, [ bloco ], after:, position:).fetch("results").first.fetch("id")
     end
 
-    # Apaga só o que está no ledger. `delete_block` trata 404 como sucesso
-    # (o bloco pode ter sido apagado à mão no Notion). O DELETE do pai leva
-    # os filhos junto (verificado contra a API em 2026-10-21).
+    # Apaga só o que é nosso. `delete_block` trata 404 como sucesso (o bloco
+    # pode ter sido apagado à mão no Notion). O DELETE do pai leva os filhos
+    # junto (verificado contra a API em 2026-10-21). Um bloco que falha não
+    # interrompe os outros: o ciclo seguinte reconstrói.
     def apagar_do_dia(estado)
-      Array(estado&.dig(:blocks)).each do |bloco|
-        @client.delete_block(bloco.fetch(:id))
+      apagar(Array(estado&.dig(:blocks)).map { |bloco| bloco.fetch(:id) })
+    end
+
+    def apagar(ids)
+      ids.each do |id|
+        @client.delete_block(id)
       rescue Tracker::Notion::ApiError => e
-        @logger.warn("[tracking] não deu para apagar block #{bloco[:id]}: #{e.message}")
+        @logger.warn("[tracking] não deu para apagar block #{id}: #{e.message}")
       end
     end
 
@@ -223,7 +264,7 @@ module Tracking
       dir = Rails.root.join("storage/tracking")
       FileUtils.mkdir_p(dir)
       caminho = dir.join("brag_#{day.iso8601}.bak")
-      texto = blocos.map { |b| "#{b.fetch('type')}: #{@page_days.text(b)}" }.join("\n")
+      texto = blocos.map { |b| "#{b.fetch('type')}: #{Tracker::Notion::PageDays.text_of(b)}" }.join("\n")
       File.write(caminho, texto)
       @stdout.puts("Backup: #{caminho}")
     end

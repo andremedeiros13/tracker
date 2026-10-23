@@ -6,9 +6,13 @@ module Tracking
     # (changelog normalizado + comentários) deles. Cru (Entities::JiraDay) — a
     # regra de "o que conta como entrega" é do BuildDayReport.
     #
-    # O changelog do bulkfetch chega com duas anomalias em relação ao changelog
-    # individual (created em epoch ms, author como accountId). Elas morrem aqui:
-    # o domínio só vê Entities::Activity com autor e instante já resolvidos.
+    # Três coisas morrem aqui e não atravessam o seam:
+    #   - as anomalias do bulkfetch (epoch ms, author como accountId);
+    #   - a forma do payload (`fields`, `assignee/displayName`, statusCategory);
+    #   - a identidade do engenheiro. O adapter resolve `JIRA_ACCOUNT_ID` uma
+    #     vez e marca `mine` no card e em cada atividade — antes o domínio
+    #     recebia o mesmo account id por um segundo parâmetro e comparava de
+    #     novo, sem nada garantir que os dois lados concordavam.
     #
     # Filtro `estreito` (default): só cards com a minha participação, ~0,5 s.
     # Filtro `largo`: tudo que mudou na janela — 3.400 issues e ~60 s por ciclo,
@@ -63,23 +67,24 @@ module Tracking
         @reviewer_field_id.to_s[/\d+\z/].presence
       end
 
-      # Campos que o BuildDayReport usa, já achatados (o adapter normaliza o
-      # payload do Jira; o domínio não conhece "fields"/"assignee/displayName").
+      # Payload do Jira → Entities::Card. `mine` sai daqui resolvido: o domínio
+      # não compara account ids.
       def normalizar(card)
         campos = card.fetch("fields", {})
-        {
-          "key" => card.fetch("key"),
-          "url" => url_do_card(card.fetch("key")),
-          "title" => campos["summary"].to_s,
-          "status" => campos.dig("status", "name").to_s,
-          "status_category" => campos.dig("status", "statusCategory", "key").to_s,
-          "assignee" => campos.dig("assignee", "displayName"),
-          "assignee_id" => campos.dig("assignee", "accountId"),
-          "reporter" => campos.dig("reporter", "displayName"),
-          "epic" => campos.dig("parent", "fields", "summary"),
-          "description" => campos["description"],
-          "id" => card.fetch("id")
-        }
+        assignee_id = campos.dig("assignee", "accountId")
+        Entities::Card.new(
+          key: card.fetch("key"),
+          url: url_do_card(card.fetch("key")),
+          title: campos["summary"].to_s,
+          status: campos.dig("status", "name").to_s,
+          status_category: campos.dig("status", "statusCategory", "key").to_s,
+          mine: assignee_id == @account_id,
+          assignee_name: campos.dig("assignee", "displayName"),
+          reporter_name: campos.dig("reporter", "displayName"),
+          epic: campos.dig("parent", "fields", "summary"),
+          description: campos["description"],
+          id: card.fetch("id")
+        )
       end
 
       # { "KEY" => [Activity, ...] } — changelog e comentários do dia já
@@ -97,7 +102,7 @@ module Tracking
         Array(entradas).map do |entrada|
           Entities::Activity.new(
             kind: :changelog,
-            author_id: autor_da(entrada),
+            mine: autor_da(entrada) == @account_id,
             at: instante_de(entrada.fetch("created")),
             status_items: itens_de_status(entrada)
           )
@@ -108,7 +113,7 @@ module Tracking
         Array(card.dig("fields", "comment", "comments")).map do |comentario|
           Entities::Activity.new(
             kind: :comment,
-            author_id: comentario.dig("author", "accountId"),
+            mine: comentario.dig("author", "accountId") == @account_id,
             at: instante_de(comentario.fetch("created"))
           )
         end

@@ -29,7 +29,7 @@ RSpec.describe Tracker::Notion::SchemaValidator do
     allow(client).to receive(:retrieve_database).and_return(database_props({}))
 
     expect { validator.validate! }
-      .to raise_error(Tracker::Notion::SchemaError, /'Name' ausente/)
+      .to raise_error(Tracker::Notion::SchemaError, /propriedade 'Name' \(name\) ausente/)
   end
 
   it "falha quando o tipo diverge" do

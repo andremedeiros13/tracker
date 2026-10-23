@@ -2,20 +2,27 @@
 
 module Tracker
   module Notion
-    # Valida as propriedades do Database "To-Dos" contra o schema esperado
-    # (ADR 0001: valida no boot e falha cedo se divergir).
+    # Valida as propriedades de um Database contra o schema esperado (ADR
+    # 0001: valida no boot e falha cedo se divergir).
+    #
+    # O schema vem por injeção — é o chamador que sabe QUAL database está
+    # sendo validado (hoje só o To-Dos, mas o validador não é do domínio
+    # Todos: ele é do transporte do Notion).
     class SchemaValidator
       def initialize(client:, expected:)
         @client = client
         @expected = expected
       end
 
+      # `expected` é { papel => { notion:, type:, options: } }; comparamos o
+      # nome que o schema declara com o que a API devolve.
       def validate!
         atual = @client.retrieve_database.fetch("properties")
         divergencias = []
-        @expected.each do |nome, esperado|
+        @expected.each do |papel, esperado|
+          nome = esperado.fetch(:notion)
           if (prop = atual[nome]).nil?
-            divergencias << "propriedade '#{nome}' ausente"
+            divergencias << "propriedade '#{nome}' (#{papel}) ausente"
             next
           end
           if prop["type"] != esperado[:type].to_s

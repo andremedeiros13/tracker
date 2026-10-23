@@ -10,14 +10,16 @@ RSpec.describe Tracking::UseCases::RebuildDayReport do
   let(:brag) { instance_double(Tracking::BragDocument) }
   let(:stdout) { StringIO.new }
   let(:card) do
-    { "id" => "id-1", "key" => "CHEKOUT-1", "title" => "card", "url" => "u",
-      "status" => "Em andamento", "status_category" => "indeterminate",
-      "assignee" => "André", "assignee_id" => "acc-eu", "reporter" => "R",
-      "epic" => nil, "description" => nil }
+    Tracking::Entities::Card.new(
+      id: "id-1", key: "CHEKOUT-1", title: "card", url: "u",
+      status: "Em andamento", status_category: "indeterminate",
+      mine: true, assignee_name: "André", reporter_name: "R",
+      epic: nil, description: nil
+    )
   end
   let(:activities) do
     { "CHEKOUT-1" => [ Tracking::Entities::Activity.new(
-      kind: :changelog, author_id: "acc-eu", at: Time.zone.parse("#{dia} 10:00"),
+      kind: :changelog, mine: true, at: Time.zone.parse("#{dia} 10:00"),
       status_items: [ { from: "To Do", to: "In Progress" } ]
     ) ] }
   end
@@ -27,8 +29,6 @@ RSpec.describe Tracking::UseCases::RebuildDayReport do
   end
 
   before do
-    # BuildDayReport lê o account do ENV quando não recebe (no app real vem do .env).
-    stub_const("ENV", ENV.to_h.merge("JIRA_ACCOUNT_ID" => "acc-eu"))
     allow(jira).to receive(:dia).and_return(
       Tracking::Entities::JiraDay.new(cards: [ card ], activities:)
     )

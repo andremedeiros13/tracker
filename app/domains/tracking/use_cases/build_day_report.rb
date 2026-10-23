@@ -7,13 +7,16 @@ module Tracking
     # entrega", e é o único lugar que muda quando o formato do Brag evoluir.
     #
     # A espinha é o card do Jira: um PR é ligado ao card pela key extraída do
-    # título/corpo. PR sem card vira item próprio; card movido por mim mas não
+    # título/corpo. PR sem card vira item próprio; card que eu movi mas não é
     # meu vira atividade (`:moved`), nunca entrega.
+    #
+    # O domínio recebe entities, não payloads: `mine` já vem resolvido pelos
+    # adapters, que são quem conhece a identidade do engenheiro. Antes este
+    # módulo carregava o `JIRA_ACCOUNT_ID` e comparava account ids que o
+    # adapter já tinha usado — a mesma decisão em duas camadas.
     class BuildDayReport
-      def initialize(account_id: ENV.fetch("JIRA_ACCOUNT_ID"),
-                     status_chain: Parsers::StatusChain.new,
+      def initialize(status_chain: Parsers::StatusChain.new,
                      pull_request_body: Parsers::PullRequestBody.new)
-        @account_id = account_id
         @status_chain = status_chain
         @pull_request_body = pull_request_body
       end
@@ -55,7 +58,10 @@ module Tracking
           next item if dadas.empty?
 
           usadas.concat(dadas)
-          item.with(reviews_given: dadas.map { |review| "#{review.state.downcase} o PR ##{review.pull_request.number}" })        end
+          # Guardo a review, não a linha pronta: a copy do documento é do
+          # renderer, e o estado de domínio (`:approved`) só vira texto lá.
+          item.with(reviews_given: dadas)
+        end
         [ atualizados, reviews - usadas ]
       end
 
@@ -74,34 +80,33 @@ module Tracking
       # O card entra no dia se eu movi o status, comentei, ou ele é meu e teve
       # atividade hoje.
       def participou?(card, jira, day)
-        atividades = jira.activities_for(card["key"])
-        movi = atividades.any? { |a| a.changelog? && a.mine?(@account_id) && a.touches_status? && a.no_dia?(day) }
-        comentei = atividades.any? { |a| a.comment? && a.mine?(@account_id) }
+        atividades = jira.activities_for(card.key)
+        movi = atividades.any? { |a| a.changelog? && a.mine && a.touches_status? && a.no_dia?(day) }
+        comentei = atividades.any? { |a| a.comment? && a.mine }
         movi || comentei
       end
 
       def entradas_minhas(card, jira)
-        jira.activities_for(card["key"]).select do |atividade|
-          atividade.changelog? && atividade.mine?(@account_id) && atividade.touches_status?
+        jira.activities_for(card.key).select do |atividade|
+          atividade.changelog? && atividade.mine && atividade.touches_status?
         end
       end
 
       def item_do_card(card, jira, day, por_key)
-        pr = por_key[card["key"]]
-        mine = card["assignee_id"] == @account_id
+        pr = por_key[card.key]
         transicoes = transicoes_do_dia(card, jira, day)
         corpo = pr && @pull_request_body.call(pr.body)
 
         Entities::WorkItem.new(
-          key: card["key"],
-          title: card["title"],
-          url: card["url"],
-          mine: mine,
-          epic: card["epic"],
-          outcome: desfecho(card, pr, mine),
+          key: card.key,
+          title: card.title,
+          url: card.url,
+          mine: card.mine,
+          epic: card.epic,
+          outcome: desfecho(card, pr),
           outcome_at: pr&.merged_at || ultima_atividade(card, jira, day),
           status_chain: @status_chain.call(transicoes),
-          owner_name: mine ? nil : card["assignee"],
+          owner_name: card.mine ? nil : card.assignee_name,
           pull_requests: [ pr ].compact,
           reviews_received: pr&.approvals.to_a,
           reviews_given: [],
@@ -115,10 +120,10 @@ module Tracking
       # O desfecho do card de outra pessoa NUNCA é :done/:merged — o quê
       # aconteceu com o card não é o que EU fiz. Fica :moved (eu o movi) e a
       # linha diz de quem é.
-      def desfecho(card, pr, mine)
-        return :moved unless mine
+      def desfecho(card, pr)
+        return :moved unless card.mine
         return :merged if pr&.merged?
-        return :done if card["status_category"] == "done"
+        return :done if card.done?
 
         :in_progress
       end
@@ -130,12 +135,12 @@ module Tracking
       end
 
       def ultima_atividade(card, jira, day)
-        instantes = jira.activities_for(card["key"]).select { |a| a.no_dia?(day) }.map(&:at)
+        instantes = jira.activities_for(card.key).select { |a| a.no_dia?(day) }.map(&:at)
         instantes.max
       end
 
       def comentarios_meus(card, jira)
-        jira.activities_for(card["key"]).count { |a| a.comment? && a.mine?(@account_id) }
+        jira.activities_for(card.key).count { |a| a.comment? && a.mine }
       end
 
       # PR cujo card não entrou no dia (ou sem card): item próprio, para o

@@ -21,11 +21,24 @@ API de blocks — ADR 0001).
   task); `CollectMovedIssues`/`CollectPullRequests` (coletas dentro dos adapters)
 - **Módulo da seção**: `Tracking::BragDocument` — recebe o `DayReport` e cuida
   de header, sentinel, ledger, lock e escrita. O chamador não monta bloco nem
-  consulta o ledger: a interface é `rewrite(day, report)` / `adopt(day)`
-- **Normalização no adapter**: `JiraDayRepository` entrega `Entities::Activity`
-  (autor, instante e itens de status já resolvidos). A diferença entre o
-  bulkfetch (epoch ms, author como accountId) e o changelog individual (ISO
-  8601, `{accountId:}`) morre ali — o domínio nunca vê
+  consulta o ledger: a interface é `rewrite(day, report)` / `adopt(day)` /
+  `forget(days)`
+- **O que o adapter entrega é entity, não payload**: `JiraDayRepository`
+  devolve `Entities::Card` e `Entities::Activity` — `mine` já resolvido, sem
+  `fields`/`status_category`/`accountId`. É o mesmo contrato do
+  `GitHubDayRepository` (que já devolvia `PullRequest`/`Commit`/`GivenReview`).
+  A forma do payload do Jira morre no adapter, como a do bulkfetch já morria
+- **A identidade é resolvida no adapter**: `JIRA_ACCOUNT_ID` é lido uma vez e
+  vira `mine` no card e em cada atividade. O `BuildDayReport` não recebe mais
+  account id — duas camadas não decidem mais a mesma coisa
+- **Copy do documento é do renderer**: o adapter entrega estado de domínio
+  (`:approved`); `Renderers::BragBlocks` traduz para "Aprovado" e falha alto em
+  estado desconhecido. O mesmo vale para a linha de review anexada a um card:
+  o `WorkItem` guarda as reviews, não o texto delas
+- **Leitura da seção**: `Tracker::Notion::PageDays#section(day)` devolve
+  `Section` (`day`, `header_id`, `body`, `body_ids`, `last_id`), não blocos.
+  `PageDays.day_of`/`.text_of`/`.marker` são funções de módulo — o formato de
+  data e a extração de texto existem uma vez só, para o Brag e o 1-on-1
 - **Append no Brag document**: reconstrução com dedup — a cada ciclo a seção do
   dia é reescrita inteira (o valor do dia só se conhece quando ele acaba);
   header por dia (`heading_2` com a data), bullets com link clicável

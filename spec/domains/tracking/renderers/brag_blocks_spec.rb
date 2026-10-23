@@ -123,9 +123,21 @@ RSpec.describe Tracking::Renderers::BragBlocks do
       end
     end
 
+    it "mostra a review anexada ao card como linha de evidência" do
+      review = Tracking::Entities::GivenReview.new(
+        pull_request: pr(number: 1211), state: :approved,
+        submitted_at: Time.zone.parse("2026-10-21 10:00")
+      )
+
+      linhas = renderer.items(report(work_items: [ item(reviews_given: [ review ]) ]))
+                      .first[:bulleted_list_item][:children].map { |c| texto(c) }
+
+      expect(linhas).to include("aprovado o PR #1211")
+    end
+
     it "agrupa as revisões que eu fiz" do
       review = Tracking::Entities::GivenReview.new(
-        pull_request: pr(number: 1211), state: "Aprovado",
+        pull_request: pr(number: 1211), state: :approved,
         submitted_at: Time.zone.parse("2026-10-21 10:00")
       )
 
@@ -133,6 +145,37 @@ RSpec.describe Tracking::Renderers::BragBlocks do
 
       expect(texto(bloco)).to eq("Revisões que eu fiz")
       expect(texto(bloco[:bulleted_list_item][:children].first)).to include("PR #1211", "Aprovado")
+    end
+
+    # A copy do documento é do renderer: o adapter entrega o estado de domínio.
+    it "traduz cada estado de review para a copy do documento" do
+      textos = Tracking::Renderers::BragBlocks::ESTADOS_DE_REVIEW.map do |estado, copy|
+        review = Tracking::Entities::GivenReview.new(
+          pull_request: pr(number: 1), state: estado,
+          submitted_at: Time.zone.parse("2026-10-21 10:00")
+        )
+        bloco = renderer.items(report(given_reviews: [ review ])).last
+        [ copy, texto(bloco[:bulleted_list_item][:children].first) ]
+      end
+
+      textos.each { |copy, linha| expect(linha).to end_with(copy) }
+    end
+
+    it "falha alto em estado de review sem tradução" do
+      review = Tracking::Entities::GivenReview.new(
+        pull_request: pr(number: 1), state: :inventado,
+        submitted_at: Time.zone.parse("2026-10-21 10:00")
+      )
+
+      expect { renderer.items(report(given_reviews: [ review ])) }
+        .to raise_error(KeyError, /inventado/)
+    end
+
+    it "um dia vazio ainda ganha o bloco 'sem atividade'" do
+      blocos = renderer.items(report(work_items: []))
+
+      expect(blocos.size).to eq(1)
+      expect(texto(blocos.first, :paragraph)).to eq("— sem atividade registrada —")
     end
 
     it "agrupa commits soltos" do

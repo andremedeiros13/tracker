@@ -19,6 +19,11 @@ module Tracking
     #       movi Review → Ready for Deploy · aprovei o PR #1211
     #
     # Um item por card (não por evento de API), sem chave de dedup no texto.
+    #
+    # Este módulo é o dono da copy do documento. O adapter entrega estado de
+    # domínio (`:approved`), não texto: antes o estado de review tinha mapa nos
+    # dois lados — o adapter devolvia "Aprovado" e este arquivo mantinha o seu
+    # próprio mapa para os mesmos estados.
     class BragBlocks
       SENTINEL = "gerado pelo Tracker — edições neste trecho são sobrescritas a cada ciclo"
 
@@ -27,6 +32,15 @@ module Tracking
       ESTADOS = {
         merged: "MERGEADO", done: "CONCLUÍDO", in_progress: "EM ANDAMENTO",
         moved: "card de", reviewed: "REVISADO", commented: "COMENTADO"
+      }.freeze
+
+      # Estados de review do GitHub → o que o leitor vê. O adapter entrega o
+      # estado de domínio; a tradução é só daqui.
+      ESTADOS_DE_REVIEW = {
+        approved: "Aprovado",
+        changes_requested: "Mudanças solicitadas",
+        commented: "Comentou",
+        dismissed: "Review dispensada"
       }.freeze
 
       # Assinatura do bloco: usado pelo ledger para saber se algo mudou. Exclui
@@ -72,8 +86,12 @@ module Tracking
         paragrafo("— sem atividade registrada —", cor: "gray")
       end
 
-      # Body do dia: um bullet por item, com os sub-bullets de evidência.
+      # Body do dia: um bullet por item, com os sub-bullets de evidência. Dia
+      # vazio ainda ganha um bloco (o "sem atividade"): a seção de um dia que
+      # já existiu continua existindo.
       def items(report)
+        return [ sem_atividade ] if report.vazio?
+
         blocos = report.work_items.map { |item| bloco_do_item(item) }
         blocos << bloco_de_reviews(report.given_reviews) if report.given_reviews.any?
         blocos << bloco_de_commits(report.commits) if report.commits.any?
@@ -122,12 +140,18 @@ module Tracking
         linhas = item.pull_requests.map { |pr| linha_do_pr(pr, item) }
         # Review que eu dei no card de outra pessoa vem antes da cadeia de
         # status: é o que eu fiz ali, não a coluna em que o card estava.
-        linhas << item.reviews_given.join(" · ") if item.reviews_given.any?
+        linhas << item.reviews_given.map { |review| linha_da_review_dada(review) }.join(" · ") if item.reviews_given.any?
         linhas << linha_de_reviews(item)
         linhas << linha_de_status(item)
         linhas << "Antes: #{item.problema}" if item.problema.present?
         linhas << "Fiz: #{item.solucao}" if item.solucao.present?
         linhas.compact_blank.map { |linha| sub_bullet(linha) }
+      end
+
+      # "aprovei o PR #1211" — a review anexada à linha do card. O WorkItem
+      # guarda a review, não esta linha: a copy é daqui.
+      def linha_da_review_dada(review)
+        "#{estado_da_review(review.state).downcase} o PR ##{review.pull_request.number}"
       end
 
       def linha_do_pr(pr, item)
@@ -156,13 +180,19 @@ module Tracking
 
       def bloco_de_reviews(reviews)
         filhos = reviews.map do |review|
-          sub_bullet("PR ##{review.pull_request.number} · #{review.pull_request.title} — #{review.state}")
+          sub_bullet("PR ##{review.pull_request.number} · #{review.pull_request.title} — #{estado_da_review(review.state)}")
         end
         {
           object: "block", type: "bulleted_list_item",
           bulleted_list_item: { rich_text: [ { type: "text", text: { content: "Revisões que eu fiz" },
                                                annotations: { bold: true } } ], children: filhos }
         }
+      end
+
+      # Estado de review → copy do documento. Falha alto: um estado novo sem
+      # tradução é bug de código, não motivo para imprimir o símbolo cru.
+      def estado_da_review(estado)
+        ESTADOS_DE_REVIEW.fetch(estado.to_sym) { raise KeyError, "estado de review sem tradução: #{estado.inspect}" }
       end
 
       def bloco_de_commits(commits)

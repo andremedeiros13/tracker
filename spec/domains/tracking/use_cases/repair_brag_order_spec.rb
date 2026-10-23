@@ -9,6 +9,7 @@ RSpec.describe Tracking::UseCases::RepairBragOrder do
   let(:logger) { instance_double(ActiveSupport::Logger, info: nil, warn: nil, error: nil) }
   let(:stdout) { StringIO.new }
   let(:ledger) { Tracker::Brag::BlockLedger.new(path: File.join(dir, "state.json"), page_id: "page-brag", logger:) }
+  let(:brag) { Tracking::BragDocument.new(client:, page_id: "page-brag", ledger:, logger:, stdout:) }
   let(:dia21) { Date.new(2026, 10, 21) }
   let(:dia22) { Date.new(2026, 10, 22) }
   let(:sentinel) { Tracking::Renderers::BragBlocks::SENTINEL }
@@ -48,7 +49,7 @@ RSpec.describe Tracking::UseCases::RepairBragOrder do
   end
 
   def descrito(apply: false)
-    described_class.new(client:, page_id: "page-brag", ledger:, logger:, stdout:, apply:)
+    described_class.new(brag:, client:, page_id: "page-brag", logger:, stdout:, apply:)
   end
 
   it "em dry-run não apaga nem reconstrói nada" do
@@ -60,7 +61,7 @@ RSpec.describe Tracking::UseCases::RepairBragOrder do
     expect(stdout.string).to include("22/10/2026")
   end
 
-  it "aplica: apaga header, sentinel e corpo dos dias, e reconstrói em ordem decrescente" do
+  it "aplica: apaga o que está no ledger dos dias e reconstrói em ordem decrescente" do
     ordem = []
     allow(Tracking::UseCases::RebuildDayReport).to receive(:new) do |*_args, **_kw|
       instance_double(Tracking::UseCases::RebuildDayReport).tap do |dbl|
@@ -70,11 +71,12 @@ RSpec.describe Tracking::UseCases::RepairBragOrder do
 
     descrito(apply: true).call
 
-    expect(client).to have_received(:delete_block).with("h-21")
-    expect(client).to have_received(:delete_block).with("s-21")
+    # Só o que o ledger conhece. Header e sentinel são do rewrite, não do
+    # repair: apagá-los aqui deixaria a página sem âncora se o rebuild falhar.
     expect(client).to have_received(:delete_block).with("b-21-card")
     expect(client).to have_received(:delete_block).with("b-22-card")
-    expect(client).to have_received(:delete_block).with("h-22")
+    expect(client).not_to have_received(:delete_block).with("h-21")
+    expect(client).not_to have_received(:delete_block).with("s-21")
 
     # Reconstrói do mais novo para o mais antigo (o primeiro entra no topo).
     expect(ordem).to eq([ dia22, dia21 ])
@@ -102,5 +104,21 @@ RSpec.describe Tracking::UseCases::RepairBragOrder do
     caminho = File.join(dir, "storage/tracking/brag_2026-10-22-antes-do-repair.bak")
     expect(File).to exist(caminho)
     expect(File.read(caminho)).to include("22/10/2026")
+  end
+
+  it "um bloco que falha ao apagar não aborta o reparo" do
+    chamadas = 0
+    allow(client).to receive(:delete_block) do |id|
+      chamadas += 1
+      # 500 e não 404: o 404 é tratado como sucesso, então não exercitaria o
+      # resgate que garante o resto do reparo.
+      raise Tracker::Notion::ApiError.new("500", "fora") if id == "b-21-card"
+
+      { "object" => "block" }
+    end
+
+    expect { descrito(apply: true).call }.not_to raise_error
+    expect(chamadas).to eq(2)
+    expect(Tracking::UseCases::RebuildDayReport).to have_received(:new).twice
   end
 end

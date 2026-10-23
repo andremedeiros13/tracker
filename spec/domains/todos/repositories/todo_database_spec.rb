@@ -93,12 +93,12 @@ RSpec.describe Todos::Repositories::TodoDatabase do
     it "os labels escritos são exatamente os que a leitura sabe mapear" do
       escritos = []
       allow(client).to receive(:create_page) { |args| escritos << args; { "id" => "p" } }
-      Todos::Repositories::NotionSchema::PROPERTIES.fetch("Origem").fetch(:options).each_value do |valor|
+      Todos::Repositories::NotionSchema.options_of(:origin).each_value do |valor|
         database.create("t", origin: valor)
       end
 
       labels = escritos.map { |a| a[:properties]["Origem"][:select][:name] }
-      expect(labels).to match_array(Todos::Repositories::NotionSchema::PROPERTIES["Origem"][:options].keys)
+      expect(labels).to match_array(Todos::Repositories::NotionSchema.options_of(:origin).keys)
     end
   end
 end

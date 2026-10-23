@@ -3,35 +3,34 @@
 require "rails_helper"
 
 RSpec.describe Tracking::UseCases::BuildDayReport do
-  let(:account_id) { "acc-eu" }
-  let(:use_case) { described_class.new(account_id: account_id) }
+  let(:use_case) { described_class.new }
   let(:dia) { Date.new(2026, 10, 21) }
 
-  # --- builders de payload cru (shapes reais do Jira/GitHub) -----------------
+  # --- builders de entity (o contrato do seam) -------------------------------
 
+  # O adapter já resolveu `mine`: o domínio não conhece account id.
   def card(key:, title: "Resumo", status: "Em andamento", category: "indeterminate",
-           assignee_id: account_id, assignee: "André", epic: "[Motor][Wave2] Pagamento")
-    {
-      "id" => "id-#{key}", "key" => key, "title" => title,
-      "url" => "https://jira/browse/#{key}", "status" => status,
-      "status_category" => category, "assignee" => assignee,
-      "assignee_id" => assignee_id, "reporter" => "Marivaldo",
-      "epic" => epic, "description" => nil
-    }
+           mine: true, assignee: "André", epic: "[Motor][Wave2] Pagamento")
+    Tracking::Entities::Card.new(
+      id: "id-#{key}", key: key, title: title, url: "https://jira/browse/#{key}",
+      status: status, status_category: category, mine: mine,
+      assignee_name: assignee, reporter_name: "Marivaldo",
+      epic: epic, description: nil
+    )
   end
 
   # Shape que o adapter entrega: atividade já normalizada (sem epoch ms nem
   # author cru — isso é responsabilidade do JiraDayRepository).
-  def transicao(de:, para:, hora: "10:00", author: account_id, id: "c1")
+  def transicao(de:, para:, hora: "10:00", mine: true, id: "c1")
     Tracking::Entities::Activity.new(
-      kind: :changelog, author_id: author, at: Time.zone.parse("#{dia} #{hora}"),
+      kind: :changelog, mine: mine, at: Time.zone.parse("#{dia} #{hora}"),
       status_items: [ { from: de, to: para } ]
     )
   end
 
-  def comentario(author: account_id, hora: "16:46")
+  def comentario(mine: true, hora: "16:46")
     Tracking::Entities::Activity.new(
-      kind: :comment, author_id: author, at: Time.zone.parse("#{dia} #{hora}")
+      kind: :comment, mine: mine, at: Time.zone.parse("#{dia} #{hora}")
     )
   end
 
@@ -76,7 +75,7 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
     end
 
     it "card de outro que eu só movi vira :moved (não é minha entrega)" do
-      card = card(key: "CHEKOUT-2332", assignee_id: "acc-itallo", assignee: "Itallo")
+      card = card(key: "CHEKOUT-2332", mine: false, assignee: "Itallo")
       changelog = { "CHEKOUT-2332" => [ transicao(de: "Review", para: "Ready for Deploy") ] }
 
       item = use_case.call(dia, jira: jira_day(cards: [ card ], activities: changelog)).work_items.first
@@ -95,7 +94,7 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
 
     it "card sem transição minha hoje e sem comentário meu não entra" do
       card = card(key: "CHEKOUT-8")
-      changelog = { "CHEKOUT-8" => [ transicao(de: "To Do", para: "In Progress", hora: "10:00", author: "acc-outro") ] }
+      changelog = { "CHEKOUT-8" => [ transicao(de: "To Do", para: "In Progress", hora: "10:00", mine: false) ] }
 
       expect(use_case.call(dia, jira: jira_day(cards: [ card ], activities: changelog)).work_items).to be_empty
     end
@@ -115,7 +114,7 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
       mudanca_de_descricao = {
         "CHEKOUT-6" => [
           Tracking::Entities::Activity.new(
-            kind: :changelog, author_id: account_id, at: Time.zone.parse("#{dia} 11:00")
+            kind: :changelog, mine: true, at: Time.zone.parse("#{dia} 11:00")
           )
         ]
       }
@@ -164,7 +163,7 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
 
     it "ordena: concluídos, em andamento, cards de outros" do
       cards = [
-        card(key: "CHEKOUT-1", assignee_id: "acc-itallo", assignee: "Itallo"),
+        card(key: "CHEKOUT-1", mine: false, assignee: "Itallo"),
         card(key: "CHEKOUT-2"),
         card(key: "CHEKOUT-3"),
         card(key: "CHEKOUT-4", status: "Concluído", category: "done")

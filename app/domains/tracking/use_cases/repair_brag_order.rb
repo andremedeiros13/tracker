@@ -10,9 +10,10 @@ module Tracking
     # página crescente. O rewrite corrige isso daqui pra frente; o que já está
     # lá precisa ser rearranjado uma vez.
     #
-    # Regra de posse (a mesma do resto do módulo): só tocamos em block que está
-    # no ledger, de qualquer dia. Um bloco escrito à mão não está em ledger
-    # nenhum e é deixado onde está.
+    # A posse dos blocks é do módulo da seção (Tracking::BragDocument,
+    # `forget`), que já tem o lock, o resgate de erro por bloco e o backup.
+    # Aqui fica só o plano: quais dias, em que ordem — e o backup, que é
+    # específico desta migração.
     #
     # É DESTRUTIVA (apaga header/sentinel/corpo e reconstrói). Por isso:
     #   - só roda por rake, nunca pelo scheduler;
@@ -23,16 +24,14 @@ module Tracking
     # topo e cada seguinte logo depois do fim da anterior, que é o que produz
     # a ordem decrescente.
     class RepairBragOrder
-      def initialize(client: Tracker::Notion::Client.from_env,
-                     page_id: ENV.fetch("TRACER_NOTION_BRAG_PAGE_ID"),
-                     ledger: nil,
+      def initialize(brag: nil,
                      page_days: nil,
+                     client: Tracker::Notion::Client.from_env,
+                     page_id: ENV.fetch("TRACER_NOTION_BRAG_PAGE_ID"),
                      logger: Rails.logger,
                      stdout: $stdout,
                      apply: ENV["APPLY"] == "1")
-        @client = client
-        @page_id = page_id
-        @ledger = ledger || Tracker::Brag::BlockLedger.new(page_id:)
+        @brag = brag || Tracking::BragDocument.new(client:, page_id:, logger:, stdout:)
         @page_days = page_days || Tracker::Notion::PageDays.new(client:, page_id:)
         @logger = logger
         @stdout = stdout
@@ -40,23 +39,21 @@ module Tracking
       end
 
       def call(days: nil)
-        blocos = @page_days.blocks
-        secoes = secoes_por_dia(blocos)
-        alvos = (days || secoes.keys).sort.reverse
+        secoes = @page_days.sections
+        alvos = (days || secoes.map(&:day).compact).sort.reverse
 
         if alvos.empty?
           @stdout.puts("Nenhuma seção de dia no Brag — nada a reparar.")
           return 0
         end
 
-        imprimir_plano(blocos, secoes, alvos)
+        imprimir_plano(secoes, alvos)
         return 0 unless @apply
 
-        @ledger.with_lock do
-          secoes.each { |dia, blocos_da_secao| backup(dia, blocos_da_secao) }
-          apagar(blocos, secoes, alvos)
-          alvos.each { |dia| @ledger.forget(dia) }
-        end
+        secoes.each { |secao| backup(secao.day, secao.blocks) }
+        # Apagar é do módulo da seção: só o que está no ledger, com resgate de
+        # erro por bloco.
+        @brag.forget(alvos)
 
         alvos.each { |dia| RebuildDayReport.new.call(dia) }
         @stdout.puts("Reparado: #{alvos.map { |d| Renderers::BragBlocks.data_do_dia(d) }.join(', ')}.")
@@ -65,67 +62,23 @@ module Tracking
 
       private
 
-      # {Date => blocks da seção (header + corpo até o próximo header)}, na
-      # ordem em que aparecem na página.
-      def secoes_por_dia(blocos)
-        @page_days.section_days(blocks: blocos).uniq.index_with do |dia|
-          @page_days.section(dia, blocks: blocos)
-        end
-      end
-
-      # Ids a apagar, por dia: o header e o sentinel da seção, os blocks que o
-      # ledger daquele dia conhece, e os blocks que pertencem ao ledger de
-      # OUTRO dia (os que caíram na seção errada). Bloco desconhecido fica.
-      def ids_a_apagar(blocos, secoes, alvos)
-        de_outro_dia = {}
-        secoes.each_key do |dia|
-          Array(@ledger.day(dia)&.dig(:blocks)).each { |b| de_outro_dia[b[:id]] = dia }
-        end
-
-        alvos.flat_map do |dia|
-          secao = secoes[dia] || []
-          do_dia = Array(@ledger.day(dia)&.dig(:blocks)).map { |b| b[:id] }
-          sentinel = secao.select { |b| sentinel?(b) }.map { |b| b.fetch("id") }
-
-          secao.filter_map do |b|
-            id = b.fetch("id")
-            next id if @page_days.header?(b)
-            next id if sentinel.include?(id)
-            next id if do_dia.include?(id)
-            next id if de_outro_dia.key?(id) # está na seção errada
-
-            nil
-          end
-        end.uniq
-      end
-
-      def apagar(blocos, secoes, alvos)
-        ids = ids_a_apagar(blocos, secoes, alvos)
-        @logger.info("[tracking] repair: apagando #{ids.size} block(s)")
-        ids.each { |id| @client.delete_block(id) }
-      end
-
-      def imprimir_plano(blocos, secoes, alvos)
+      def imprimir_plano(secoes, alvos)
         @stdout.puts("== Brag: ordem atual ==")
-        secoes.each_key { |dia| @stdout.puts("  #{Renderers::BragBlocks.data_do_dia(dia)}") }
+        secoes.each { |secao| @stdout.puts("  #{Renderers::BragBlocks.data_do_dia(secao.day)}") }
         @stdout.puts("== Ordem pretendida (decrescente) ==")
         alvos.each { |dia| @stdout.puts("  #{Renderers::BragBlocks.data_do_dia(dia)}") }
-        ids = ids_a_apagar(blocos, secoes, alvos)
-        @stdout.puts("Blocks a apagar e reescrever: #{ids.size}")
-        ids.each { |id| @stdout.puts("  - #{id}") }
+        @stdout.puts("Dias a esquecer e reconstruir: #{alvos.size}")
         @stdout.puts("(dry-run — rode com APPLY=1 para aplicar)") unless @apply
       end
 
-      def sentinel?(block)
-        @page_days.block?(block, "paragraph") &&
-          @page_days.text(block).include?(Renderers::BragBlocks::SENTINEL)
-      end
-
-      def backup(dia, blocos_da_secao)
+      # Texto atual da seção, antes de apagar: o conteúdo antigo não é
+      # recuperável pelo ledger depois. Nome distinto do backup do rewrite
+      # para não sobrescrever o `.bak` da adoção.
+      def backup(dia, blocos)
         dir = Rails.root.join("storage/tracking")
         FileUtils.mkdir_p(dir)
         caminho = dir.join("brag_#{dia.iso8601}-antes-do-repair.bak")
-        File.write(caminho, blocos_da_secao.map { |b| "#{b.fetch('type')}: #{@page_days.text(b)}" }.join("\n"))
+        File.write(caminho, blocos.map { |b| "#{b.fetch('type')}: #{Tracker::Notion::PageDays.text_of(b)}" }.join("\n"))
         @stdout.puts("Backup: #{caminho}")
       end
     end
