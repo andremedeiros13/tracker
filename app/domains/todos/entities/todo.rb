@@ -20,6 +20,12 @@ module Todos
         status == :pendente ||
           (status == :snoozed && (snoozed_until.nil? || snoozed_until <= Time.current))
       end
+
+      # Quando esta tarefa entra (ou voltou a entrar) na fila de atenção.
+      # Pendente e snoozed sem data: desde a criação. Snoozed com data: o
+      # instante em que o snooze vence. É a chave de ordenação da fila — vive
+      # na entity porque é fato da tarefa, não do adapter que a leu.
+      def proximo_lembrete = snoozed_until || created_at
     end
   end
 end

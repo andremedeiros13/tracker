@@ -5,15 +5,13 @@ require "rails_helper"
 RSpec.describe Todos::UseCases::NotifyPendingTodos do
   let(:notifier) { instance_double(Tracker::NativeNotifier) }
 
-  # Fake in-memory do database — mesma interface do adapter Notion.
+  # Fake in-memory do adapter — mesma interface: devolve as candidatas, sem
+  # filtrar nem ordenar (isso é da FilaDeAtencao, não do adapter).
   let(:fake_repository) do
     Class.new do
       def initialize(todos) = @todos = todos
 
-      def notification_candidates
-        @todos.select(&:lembrete_ativo?)
-              .sort_by { |t| t.snoozed_until || t.created_at }
-      end
+      def notification_candidates = @todos
     end
   end
 

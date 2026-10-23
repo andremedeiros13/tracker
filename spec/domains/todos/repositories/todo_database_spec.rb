@@ -32,10 +32,12 @@ RSpec.describe Todos::Repositories::TodoDatabase do
       ])
     end
 
-    it "exclui snoozed com horário no futuro e inclui vencido" do
+    # O adapter só lê: quem filtra o que já venceu e ordena é a FilaDeAtencao
+    # (domínio). Aqui as candidatas saem como vieram do Notion.
+    it "devolve todas as rows candidatas, sem filtrar nem ordenar" do
       titulos = database.notification_candidates.map(&:title)
 
-      expect(titulos).to eq([ "snoozed vencido", "agora" ])
+      expect(titulos).to eq([ "agora", "snoozed futuro", "snoozed vencido" ])
     end
 
     it "consulta o Notion com filtro server-side no Status" do
@@ -47,15 +49,6 @@ RSpec.describe Todos::Repositories::TodoDatabase do
           { property: "Status", status: { equals: "Em andamento" } }
         ] }
       )
-    end
-
-    it "ordena pelo que vence primeiro (snoozed volta no horário)" do
-      allow(client).to receive(:query_database).and_return([
-        page_notion(titulo: "criada antes", status: "Pendente"),
-        page_notion(titulo: "snoozed vencido", status: "Em andamento", snoozed_until: "2020-01-01T12:00:00.000Z")
-      ])
-
-      expect(database.notification_candidates.map(&:title)).to eq([ "snoozed vencido", "criada antes" ])
     end
   end
 
