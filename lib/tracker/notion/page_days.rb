@@ -28,7 +28,7 @@ module Tracker
       # O header do Brag tem sufixo ("21/10/2026 — quarta · épico") e o do
       # 1-on-1 não; ler só o prefixo cobre os dois sem flag de formato.
       def self.day_of(block)
-        return unless block?(block, "heading_2")
+        return unless Blocks.heading?(block)
 
         # `match` (MatchData), não `string[regex]` — o colchete devolveria a
         # String inteira e os índices [1..3] virariam caracteres, não grupos.
@@ -40,17 +40,12 @@ module Tracker
         nil
       end
 
-      # Texto plano de um block, qualquer que seja o tipo (paragraph, heading_2,
-      # bulleted_list_item...). Única cópia no repo.
-      def self.text_of(block)
-        tipo = block.fetch("type")
-        # Payload da API traz "plain_text"; o renderer/testes montam "text".
-        Array(block.dig(tipo, "rich_text") || block.dig(tipo, :rich_text)).map do |t|
-          t["plain_text"] || t.dig("text", "content") || t.dig(:text, :content).to_s
-        end.join
-      end
+      # Texto plano de um block, qualquer que seja o tipo. A forma do bloco é
+      # do módulo Notion::Blocks — aqui só delegamos, para quem já tem a page
+      # em mãos não precisar saber disso.
+      def self.text_of(block) = Blocks.texto_de(block)
 
-      def self.block?(block, type) = block.fetch("type") == type
+      def self.block?(block, type) = Blocks.tipo_de(block) == type
 
       # Todas as seções da page, na ordem em que aparecem. `blocks:` permite
       # reaproveitar uma leitura já feita — o caminho de escrita do Brag lê a

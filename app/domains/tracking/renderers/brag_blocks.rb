@@ -64,7 +64,7 @@ module Tracking
       def header(day, epic_note)
         texto = "#{self.class.data_do_dia(day)} — #{DIAS[day.to_date.wday]}"
         texto = "#{texto} · #{resumir(epic_note)}" if epic_note.present?
-        paragrafo(texto, tipo: "heading_2", chave: :heading_2)
+        Tracker::Notion::Blocks.heading(texto)
       end
 
       # O MESMO conteúdo em texto puro, para o preview (rake tracking:preview e
@@ -88,17 +88,11 @@ module Tracking
       end
 
       def sentinel
-        {
-          object: "block", type: "paragraph",
-          paragraph: {
-            rich_text: [ { type: "text", text: { content: SENTINEL },
-                           annotations: { color: "gray", italic: true } } ]
-          }
-        }
+        Tracker::Notion::Blocks.paragrafo(SENTINEL, cor: "gray", italico: true)
       end
 
       def sem_atividade
-        paragrafo("— sem atividade registrada —", cor: "gray")
+        Tracker::Notion::Blocks.paragrafo("— sem atividade registrada —", cor: "gray")
       end
 
       # Body do dia: um bullet por item, com os sub-bullets de evidência. Dia
@@ -116,23 +110,12 @@ module Tracking
       private
 
       def bloco_do_item(item)
-        filhos = filhos_do_item(item)
-        {
-          object: "block",
-          type: "bulleted_list_item",
-          bulleted_list_item: {
-            rich_text: texto_do_item(item),
-            children: filhos
-          }
-        }
+        Tracker::Notion::Blocks.bullet(runs: texto_do_item(item), filhos: filhos_do_item(item))
       end
 
-      # Texto plano de um bloco renderizado — o preview não introspecta o shape
-      # da API, lê o que o próprio renderer escreveu (`type` é string, o
-      # payload do bloco é indexado pelo símbolo correspondente).
-      def texto_do_bloco(bloco)
-        Array(bloco.dig(bloco.fetch(:type).to_sym, :rich_text)).map { |t| t[:text][:content] }.join
-      end
+      # Texto plano de um bloco renderizado — a leitura da forma é do módulo
+      # Notion::Blocks, o mesmo que a escreveu.
+      def texto_do_bloco(bloco) = Tracker::Notion::Blocks.texto_de(bloco)
 
       # "#2301" para card, "PR #1216" para item sem card. Copy, portanto aqui —
       # antes vivia na entity e o domínio carregava formato de documento.
@@ -144,12 +127,11 @@ module Tracking
 
       # "#2301 · " + título (link) + " — MERGEADO 16:48" (ou "card de Itallo").
       def texto_do_item(item)
-        textos = [ { type: "text", text: { content: "#{referencia_de(item)} · " } } ]
-        # O link vai DENTRO de `text` — ao lado, a API responde 400
-        # ("rich_text[1].link should be not present").
-        textos << { type: "text", text: { content: item.title, link: { url: item.url } } }
+        textos = [ Tracker::Notion::Blocks.run("#{referencia_de(item)} · ") ]
+        # O link vai DENTRO de `text` — o construtor de blocos cuida disso.
+        textos << Tracker::Notion::Blocks.run(item.title, link: item.url)
         if (sufixo = sufixo_de_estado(item))
-          textos << { type: "text", text: { content: " — #{sufixo}" }, annotations: { bold: true } }
+          textos << Tracker::Notion::Blocks.run(" — #{sufixo}", negrito: true)
         end
         textos
       end
@@ -224,11 +206,7 @@ module Tracking
         filhos = reviews.map do |review|
           sub_bullet("PR ##{review.pull_request.number} · #{review.pull_request.title} — #{estado_da_review(review.state)}")
         end
-        {
-          object: "block", type: "bulleted_list_item",
-          bulleted_list_item: { rich_text: [ { type: "text", text: { content: "Revisões que eu fiz" },
-                                               annotations: { bold: true } } ], children: filhos }
-        }
+        grupo("Revisões que eu fiz", filhos)
       end
 
       # Estado de review → copy do documento. Falha alto: um estado novo sem
@@ -239,23 +217,18 @@ module Tracking
 
       def bloco_de_commits(commits)
         filhos = commits.map { |commit| sub_bullet("#{commit.short_sha} #{commit.message} (#{commit.repo})") }
-        {
-          object: "block", type: "bulleted_list_item",
-          bulleted_list_item: { rich_text: [ { type: "text", text: { content: "Commits soltos" },
-                                               annotations: { bold: true } } ], children: filhos }
-        }
+        grupo("Commits soltos", filhos)
       end
 
-      def sub_bullet(linha)
-        { object: "block", type: "bulleted_list_item",
-          bulleted_list_item: { rich_text: [ { type: "text", text: { content: linha } } ] } }
+      # Bullet de título em negrito com os filhos por baixo — a forma das duas
+      # seções de cauda (revisões dadas, commits soltos).
+      def grupo(titulo, filhos)
+        Tracker::Notion::Blocks.bullet(
+          runs: [ Tracker::Notion::Blocks.run(titulo, negrito: true) ], filhos:
+        )
       end
 
-      def paragrafo(texto, tipo: "paragraph", chave: :paragraph, cor: nil)
-        texto_rich = { type: "text", text: { content: texto } }
-        texto_rich[:annotations] = { color: cor } if cor
-        { object: "block", type: tipo, chave => { rich_text: [ texto_rich ] } }
-      end
+      def sub_bullet(linha) = Tracker::Notion::Blocks.bullet_texto(linha)
 
       def data_hora(instante, day)
         return hora(instante) if instante.to_date == day.to_date
