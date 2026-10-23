@@ -11,8 +11,14 @@ module Todos
       :page_id, :title, :origin, :status,
       :snoozed_until, :created_at, :last_edited_time
     ) do
+      # Snoozed SEM data é estado que o Notion permite (coluna "Em andamento"
+      # sem "Snoozed até") e o schema não proíbe. Sem data não existe "até
+      # quando silenciar", então lembra — é melhor avisar de novo do que sumir
+      # com a tarefa. Antes o `<=` estourava NoMethodError em nil e derrubava
+      # o ciclo de notificação inteiro enquanto a linha existisse.
       def lembrete_ativo?
-        status == :pendente || (status == :snoozed && snoozed_until <= Time.current)
+        status == :pendente ||
+          (status == :snoozed && (snoozed_until.nil? || snoozed_until <= Time.current))
       end
     end
   end

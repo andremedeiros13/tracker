@@ -68,5 +68,30 @@ RSpec.describe OneOnOnes::Repositories::MeetingRepository do
       expect(client).to have_received(:append_block_children) { |_, blocks| children = blocks }
       expect(children.map { |b| b[:type] }).not_to include("paragraph")
     end
+
+    # O import escreve aqui e só depois move o arquivo: se algo falhar no meio,
+    # a mesma reunião chega de novo no ciclo seguinte.
+    it "não appenda duas vezes a mesma reunião no mesmo dia (idempotência)" do
+      allow(client).to receive(:block_children).and_return([
+        header("23/09/2026"),
+        { "id" => "h-titulo", "type" => "heading_3",
+          "heading_3" => { "rich_text" => [ { "plain_text" => "1:1 André / Spalenza" } ] } }
+      ])
+
+      expect(repository.append(meeting, [])).to be(false)
+      expect(client).not_to have_received(:append_block_children)
+    end
+
+    it "appenda quando o dia já tem outra reunião (título diferente)" do
+      allow(client).to receive(:block_children).and_return([
+        header("23/09/2026"),
+        { "id" => "h-outro", "type" => "heading_3",
+          "heading_3" => { "rich_text" => [ { "plain_text" => "1:1 André / Alguém" } ] } }
+      ])
+
+      repository.append(meeting, [])
+
+      expect(client).to have_received(:append_block_children).once
+    end
   end
 end

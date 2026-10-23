@@ -18,19 +18,40 @@ module OneOnOnes
       # Appenda a reunião no histórico: header do dia (se ainda não existe),
       # título (heading_3 — múltiplas reuniões por dia), resumo e os action
       # items (✅ meus — viraram To-Do; 👤 dos outros — só histórico).
+      #
+      # IDEMPOTENTE por (dia, título): o import escreve na page e só depois
+      # move o arquivo. Se algo falhar no meio, o arquivo fica na pasta e o
+      # ciclo seguinte chama este método de novo — sem esta checagem, a mesma
+      # reunião entrava duas vezes na page (e os To-Dos junto). O README
+      # prometia "nunca re-importado"; a garantia tem de estar aqui, não só no
+      # `mv`.
+      #
+      # Devolve true quando escreveu e false quando a reunião já estava lá —
+      # quem chama usa isso para não re-criar os To-Dos dos action items.
       def append(meeting, action_items)
+        secao = @page_days.section(meeting.date)
+        return false if ja_importada?(secao, meeting)
+
         children = []
-        children << header_do_dia(meeting.date) unless header_existe?(meeting.date)
+        children << header_do_dia(meeting.date) if secao.nil? || secao.empty?
         children << titulo_da(meeting)
         children.concat(bullets_do_resumo(meeting))
         children.concat(action_items.map { |item| bullet_do(item) })
         @client.append_block_children(@page_id, children)
+        true
       end
 
       private
 
-      def header_existe?(date)
-        @page_days.header_exists?(date)
+      # A reunião já está no histórico do dia? O título é o marcador: uma
+      # reunião por título por dia (heading_3 dentro da seção do dia).
+      def ja_importada?(secao, meeting)
+        return false if secao.nil?
+
+        secao.body.any? do |block|
+          Tracker::Notion::PageDays.block?(block, "heading_3") &&
+            Tracker::Notion::PageDays.text_of(block) == meeting.title
+        end
       end
 
       def header_do_dia(date)

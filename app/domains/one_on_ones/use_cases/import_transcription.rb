@@ -44,7 +44,9 @@ module OneOnOnes
         return mover(arquivo) if resultado[:meetings].empty?
 
         action_items = marcar_meus(resultado[:action_items])
-        @meetings.append(resultado[:meetings].first, action_items)
+        # Reunião já no histórico (o ciclo anterior escreveu e não chegou a
+        # mover o arquivo): não re-cria os To-Dos dos action items.
+        return mover(arquivo) unless @meetings.append(resultado[:meetings].first, action_items)
 
         criados = action_items.select(&:mine?)
         criados.each { |item| @todos.create("#{item.owner}: #{item.description}", origin: :via_transcricao) }
@@ -67,11 +69,13 @@ module OneOnOnes
         end
       end
 
-      # Dedup + histórico local: importado/ nunca é re-importado.
+      # Dedup + histórico local: importado/ nunca é re-importado. Devolve 0
+      # porque mover não cria To-Do nenhum (o caso da reunião já importada).
       def mover(arquivo)
         importados = File.join(@dir, "importados")
         FileUtils.mkdir_p(importados)
         FileUtils.mv(arquivo, File.join(importados, File.basename(arquivo)))
+        0
       end
     end
   end

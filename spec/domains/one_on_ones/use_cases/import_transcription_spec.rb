@@ -20,7 +20,9 @@ RSpec.describe OneOnOnes::UseCases::ImportTranscription do
   end
 
   before do
-    allow(meetings).to receive(:append)
+    # `append` devolve true quando escreveu — o use case só cria To-Dos nesse
+    # caso (reunião já no histórico não gera To-Do de novo).
+    allow(meetings).to receive(:append).and_return(true)
     allow(todos).to receive(:create)
   end
 
@@ -75,6 +77,20 @@ RSpec.describe OneOnOnes::UseCases::ImportTranscription do
 
       expect(meetings).to have_received(:append).once
       expect(todos).to have_received(:create).exactly(7).times
+    end
+
+    # O arquivo só sai da pasta DEPOIS da escrita no Notion. Se o processo cai
+    # no meio, o ciclo seguinte lê o mesmo arquivo — e não pode duplicar nem a
+    # reunião na page nem os To-Dos.
+    it "reunião já no histórico não duplica To-Dos" do
+      allow(meetings).to receive(:append).and_return(false)
+      soltar_transcricao
+
+      resultado = use_case.call
+
+      expect(resultado).to eq(0)
+      expect(todos).not_to have_received(:create)
+      expect(File.exist?(File.join(dir, "importados", "transcricao-teste.md"))).to be(true)
     end
 
     it "não cria To-Do quando o nome do usuário não está configurado" do

@@ -23,6 +23,12 @@ RSpec.describe Todos::Entities::Todo do
       expect(todo(status: :snoozed, snoozed_until: 2.minutes.ago)).to be_lembrete_ativo
     end
 
+    # "Em andamento" sem data de snooze é estado que o Notion aceita. Antes
+    # estourava NoMethodError em nil e derrubava o ciclo inteiro.
+    it "snoozed sem data de snooze lembra (não derruba o predicado)" do
+      expect(todo(status: :snoozed, snoozed_until: nil)).to be_lembrete_ativo
+    end
+
     it "concluída nunca é" do
       expect(todo(status: :concluida)).not_to be_lembrete_ativo
     end

@@ -26,6 +26,11 @@ database To-Dos, origem "Via Transcrição").
   resumo, action items (✅ meus / 👤 dos outros)
 - **Use cases**: `ParseTranscription` (puro, sem IO), `ImportTranscription`
   (o ciclo — lê, parseia, appenda, cria To-Dos, move o arquivo)
+- **Idempotência na escrita, não no `mv`**: `MeetingRepository#append` procura
+  a reunião pelo título (heading_3) dentro da seção do dia e não escreve de
+  novo se ela já está lá — devolve `false` e o import não re-cria os To-Dos.
+  O arquivo só sai da pasta depois da escrita; se o processo cair no meio, o
+  ciclo seguinte relê o mesmo arquivo sem duplicar nada
 
 ## Fontes de verdade
 
