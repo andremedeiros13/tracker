@@ -14,11 +14,11 @@ module Tracking
     # engenheiro. O domínio não compara account ids: pergunta se o card é meu.
     Card = Data.define(
       :key, :url, :title, :status, :status_category,
-      :mine, :assignee_name, :reporter_name, :epic, :description, :id
+      :mine, :assignee_name, :reporter_name, :description, :id
     ) do
-      def initialize(mine: false, epic: nil, description: nil, assignee_name: nil,
+      def initialize(mine: false, description: nil, assignee_name: nil,
                      reporter_name: nil, **resto)
-        super(mine: mine, epic: epic, description: description,
+        super(mine: mine, description: description,
               assignee_name: assignee_name, reporter_name: reporter_name, **resto)
       end
 

@@ -14,7 +14,7 @@ RSpec.describe Tracking::UseCases::RebuildDayReport do
       id: "id-1", key: "CHEKOUT-1", title: "card", url: "u",
       status: "Em andamento", status_category: "indeterminate",
       mine: true, assignee_name: "André", reporter_name: "R",
-      epic: nil, description: nil
+      description: nil
     )
   end
   let(:activities) do

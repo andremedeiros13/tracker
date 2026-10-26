@@ -9,7 +9,7 @@ module Tracking
     #
     # Formato (decisão de 2026-10-21, "exemplo A"):
     #
-    #   ## 21/10/2026 — quarta · [Motor][Wave2] Pagamento com até 3 cartões
+    #   ## 21/10/2026 — quarta
     #   • #2301 · [Payments] T11 POST /payments/{id}/capture: cobrar… — MERGEADO 16:48
     #       PR #1216 · 14 commits · 17 arquivos · +1257/−55
     #       5 comentários meus · aprovado por Marivaldo
@@ -50,21 +50,17 @@ module Tracking
         "sha256:#{Digest::SHA256.hexdigest(JSON.generate(conteudo))}"
       end
 
-      # Épico do header: cortado, senão um nome de 90 chars come a linha
-      # inteira do dia ("[Motor][Wave2] Pagamento com até 3 cartões - Fluxo de
-      # captura e gestão do ciclo de vida" → "[Motor][Wave2] Pagamento com até
-      # 3 cartões"). O nome completo está em cada card, se precisar.
-      EPICO_MAX = 60
-
       # Data do header ("21/10/2026") — formato único, compartilhado com o
       # leitor de seções (Tracker::Notion::PageDays), que usa o mesmo marcador
       # para achar a seção do dia quando o ledger não está disponível.
       def self.data_do_dia(day) = Tracker::Notion::PageDays.marker(day)
 
-      def header(day, epic_note)
-        texto = "#{self.class.data_do_dia(day)} — #{DIAS[day.to_date.wday]}"
-        texto = "#{texto} · #{resumir(epic_note)}" if epic_note.present?
-        Tracker::Notion::Blocks.heading(texto)
+      # O header identifica o DIA — nada mais. A frente de trabalho (wave) não
+      # entra aqui: ela é do card, e o card já aparece com título e estado no
+      # próprio item. Antes o épico comum ia no header e precisava ser cortado;
+      # o corte caía no meio da palavra ("Fluxo de captu…").
+      def header(day)
+        Tracker::Notion::Blocks.heading("#{self.class.data_do_dia(day)} — #{DIAS[day.to_date.wday]}")
       end
 
       # O MESMO conteúdo em texto puro, para o preview (rake tracking:preview e
@@ -72,7 +68,7 @@ module Tracking
       # case mantinha um segundo caminho de renderização em texto, e os dois
       # precisavam concordar sobre header, ordem e dia vazio.
       def preview(day, report)
-        linhas = [ "== #{day.iso8601} ==", "## #{texto_do_bloco(header(day, report.epic_note))}" ]
+        linhas = [ "== #{day.iso8601} ==", "## #{texto_do_bloco(header(day))}" ]
         items(report).each do |bloco|
           linhas << "• #{texto_do_bloco(bloco)}"
           Array(bloco.dig(bloco.fetch(:type).to_sym, :children)).each do |filho|
@@ -80,11 +76,6 @@ module Tracking
           end
         end
         linhas.join("\n")
-      end
-
-      def resumir(texto)
-        texto = texto.to_s.squish
-        texto.length > EPICO_MAX ? "#{texto[0, EPICO_MAX - 1].rstrip}…" : texto
       end
 
       def sentinel

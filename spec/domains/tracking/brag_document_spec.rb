@@ -25,8 +25,8 @@ RSpec.describe Tracking::BragDocument do
     )
   end
 
-  def report(items: [ item ], epic_note: nil)
-    Tracking::Entities::DayReport.new(date: dia, epic_note:, work_items: items)
+  def report(items: [ item ])
+    Tracking::Entities::DayReport.new(date: dia, work_items: items)
   end
 
   # Stub do client que simula ids novos a cada append e respeita a posição.
@@ -41,6 +41,8 @@ RSpec.describe Tracking::BragDocument do
       { "results" => registros }
     end
     allow(client).to receive(:delete_block) { { "object" => "block" } }
+    # O header de uma seção que já existe é atualizado (não recriado).
+    allow(client).to receive(:update_block) { { "object" => "block" } }
     sequencia
   end
 
@@ -53,6 +55,7 @@ RSpec.describe Tracking::BragDocument do
       { "results" => Array.new(children.size) { |i| { "id" => "blk-#{envios.size - children.size + i}" } } }
     end
     allow(client).to receive(:delete_block) { { "object" => "block" } }
+    allow(client).to receive(:update_block) { { "object" => "block" } }
     envios
   end
 
@@ -74,13 +77,36 @@ RSpec.describe Tracking::BragDocument do
         .with("page-brag", anything, after: "novo-2")
     end
 
-    it "monta o header com a data e o épico (sem o chamador saber do formato)" do
+    it "monta o header só com a data (sem o chamador saber do formato)" do
       blocos = capturar_appends
 
-      brag.rewrite(dia, report(epic_note: "[Motor][Wave2] Pagamento"))
+      brag.rewrite(dia, report)
 
       header = blocos.find { |b| b[:type] == "heading_2" }
-      expect(header[:heading_2][:rich_text].first[:text][:content]).to eq("21/10/2026 — quarta · [Motor][Wave2] Pagamento")
+      expect(header[:heading_2][:rich_text].first[:text][:content]).to eq("21/10/2026 — quarta")
+    end
+
+    # O header de um dia já escrito ficava congelado: o código só criava, nunca
+    # atualizava. Formato novo de copy não chegava a um dia que já tinha seção.
+    it "atualiza o header existente quando o texto diverge do formato atual" do
+      antigo = header("21/10/2026 — quarta · [Motor][Wave2] Pagamento com até 3 cartões - Fluxo de captu…")
+      stub_client(existentes: [ antigo ])
+      allow(client).to receive(:update_block)
+
+      brag.rewrite(dia, report)
+
+      expect(client).to have_received(:update_block)
+        .with("h-21/10/2026 — quarta · [Motor][Wave2] Pagamento com até 3 cartões - Fluxo de captu…",
+              hash_including(:heading_2))
+    end
+
+    it "não atualiza o header quando o texto já está no formato atual" do
+      stub_client(existentes: [ header("21/10/2026 — quarta") ])
+      allow(client).to receive(:update_block)
+
+      brag.rewrite(dia, report)
+
+      expect(client).not_to have_received(:update_block)
     end
 
     it "não escreve nada quando o conteúdo é idêntico (idempotência)" do

@@ -93,7 +93,9 @@ RSpec.describe Tracker::Notion::PageDays do
   end
 
   describe ".day_of" do
-    it "lê a data do header, ignorando o sufixo (dia da semana e épico)" do
+    # Compatibilidade: headers escritos antes de o épico sair da copy ainda
+    # estão na página. A leitura é por prefixo, então os dois formatos passam.
+    it "lê a data do header legado (com o épico que hoje não é mais escrito)" do
       expect(described_class.day_of(header(texto: "21/10/2026 — quarta · [Motor][Wave2] Pagamento")))
         .to eq(dia)
     end

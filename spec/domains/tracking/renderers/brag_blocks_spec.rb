@@ -27,10 +27,9 @@ RSpec.describe Tracking::Renderers::BragBlocks do
     Tracking::Entities::WorkItem.new(**padrao.merge(over))
   end
 
-  def report(work_items: [ item ], given_reviews: [], commits: [], epic_note: nil)
-    Tracking::Entities::DayReport.new(date: dia, epic_note: epic_note,
-                                      work_items: work_items, given_reviews: given_reviews,
-                                      commits: commits)
+  def report(work_items: [ item ], given_reviews: [], commits: [])
+    Tracking::Entities::DayReport.new(date: dia, work_items: work_items,
+                                      given_reviews: given_reviews, commits: commits)
   end
 
   def texto(bloco, tipo = :bulleted_list_item)
@@ -38,20 +37,19 @@ RSpec.describe Tracking::Renderers::BragBlocks do
   end
 
   describe "#header" do
-    it "usa a data por extenso e o épico quando há" do
-      bloco = renderer.header(dia, "[Motor][Wave2] Pagamento")
-
-      expect(texto(bloco, :heading_2)).to eq("21/10/2026 — quarta · [Motor][Wave2] Pagamento")
+    it "é só a data e o dia da semana" do
+      expect(texto(renderer.header(dia), :heading_2)).to eq("21/10/2026 — quarta")
     end
 
-    it "corta o épico longo (o nome completo está em cada card)" do
-      epico = "[Motor][Wave2] Pagamento com até 3 cartões - Fluxo de captura e gestão do ciclo de vida"
+    # O épico ia no header e precisava ser cortado — o corte caía no meio da
+    # palavra ("Fluxo de captu…"). Agora a frente de trabalho é do card, e o
+    # header identifica só o dia.
+    it "não carrega wave nem card" do
+      texto_do_header = texto(renderer.header(dia), :heading_2)
 
-      expect(texto(renderer.header(dia, epico), :heading_2)).to end_with("…")
-    end
-
-    it "sem épico, só a data" do
-      expect(texto(renderer.header(dia, nil), :heading_2)).to eq("21/10/2026 — quarta")
+      expect(texto_do_header).not_to include("Motor")
+      expect(texto_do_header).not_to include("…")
+      expect(texto_do_header).not_to include("·")
     end
   end
 

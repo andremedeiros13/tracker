@@ -24,7 +24,7 @@ ficam os termos que atravessam mais de um domínio.
   de status). É o que o adapter entrega ao domínio; o detalhe de transporte
   (epoch ms, formato de author, accountId) não passa daqui.
 - **Relatório do dia** (`Tracking::Entities::DayReport`) — o dia agregado e
-  ordenado, pronto para render: itens, reviews dadas, commits, épico comum.
+  ordenado, pronto para render: itens, reviews dadas, commits.
 - **Seção do dia** (`Tracking::Notion::Section`) — o trecho de uma page que
   pertence a um dia: header (`heading_2` com a data), sentinel e body. No Brag
   é reconstruída; no 1-on-1 só se appenda.

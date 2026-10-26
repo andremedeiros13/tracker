@@ -49,7 +49,7 @@ module Tracker
         end
       end
 
-      # Estado do dia: { header_id:, sentinel_id:, blocks: [{ id:, signature: }] } ou nil.
+      # Estado do dia: { header_id:, header_signature:, sentinel_id:, blocks: [{ id:, signature: }] } ou nil.
       def day(date)
         entrada = read.fetch("days", {})[chave(date)]
         return if entrada.nil?
@@ -62,11 +62,15 @@ module Tracker
       # Grava (ou substitui) o estado do dia. Escrita atômica: um tmp no mesmo
       # diretório + rename — o rename é atômico no mesmo filesystem, então um
       # kill no meio nunca deixa o arquivo pela metade.
-      def record(date, header_id:, sentinel_id: nil, blocks: [])
+      #
+      # `header_signature` assina o TEXTO do header: sem ela, uma mudança só de
+      # header (o corpo igual) não era detectada e o formato antigo ficava.
+      def record(date, header_id:, sentinel_id: nil, blocks: [], header_signature: nil)
         estado = read
         estado["days"] ||= {}
         estado["days"][chave(date)] = {
           "header_id" => header_id,
+          "header_signature" => header_signature,
           "sentinel_id" => sentinel_id,
           "blocks" => blocks.map { |b| { "id" => b.fetch(:id), "signature" => b[:signature] } },
           "rebuilt_at" => Time.current.iso8601

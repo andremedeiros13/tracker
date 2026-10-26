@@ -25,8 +25,9 @@ module Tracker
       def self.marker(day) = day.to_date.strftime("%d/%m/%Y")
 
       # Data de um header (`dd/mm/aaaa`), ou nil se o texto não for uma data.
-      # O header do Brag tem sufixo ("21/10/2026 — quarta · épico") e o do
-      # 1-on-1 não; ler só o prefixo cobre os dois sem flag de formato.
+      # O header do Brag tem sufixo ("21/10/2026 — quarta") e o do 1-on-1 não;
+      # ler só o prefixo cobre os dois sem flag de formato — e ainda lê headers
+      # antigos, escritos quando o épico entrava nesse sufixo.
       def self.day_of(block)
         return unless Blocks.heading?(block)
 

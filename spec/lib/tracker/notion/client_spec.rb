@@ -49,6 +49,36 @@ RSpec.describe Tracker::Notion::Client do
     end
   end
 
+  describe "#update_block" do
+    it "manda PATCH no path do block" do
+      req = nil
+      http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:start).and_yield(http)
+      allow(http).to receive(:request) { |r| req = r; http_success({ "object" => "block" }) }
+
+      client.update_block("blk-1", Tracker::Notion::Blocks.heading("21/10/2026 — quarta"))
+
+      expect(req.method).to eq("PATCH")
+      expect(req.path).to eq("/v1/blocks/blk-1")
+    end
+
+    # `object` e `type` são identidade do block, não conteúdo: a API responde
+    # 400 se forem no corpo do PATCH.
+    it "manda só o payload do tipo, sem object/type" do
+      req = nil
+      http = instance_double(Net::HTTP)
+      allow(Net::HTTP).to receive(:start).and_yield(http)
+      allow(http).to receive(:request) { |r| req = r; http_success({ "object" => "block" }) }
+
+      client.update_block("blk-1", Tracker::Notion::Blocks.heading("21/10/2026 — quarta"))
+
+      corpo = JSON.parse(req.body)
+      expect(corpo).not_to have_key("object")
+      expect(corpo).not_to have_key("type")
+      expect(corpo.dig("heading_2", "rich_text", 0, "text", "content")).to eq("21/10/2026 — quarta")
+    end
+  end
+
   describe "#append_block_children" do
     it "põe `after` no body quando dado" do
       req = nil

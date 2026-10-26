@@ -67,6 +67,9 @@ module Tracking
     def rewrite(day, report)
       blocos = @renderer.items(report)
       assinaturas = blocos.map { |bloco| Renderers::BragBlocks.signature(bloco) }
+      # O header entra na comparação: antes só o corpo era assinado, então uma
+      # mudança de formato do header (com o corpo igual) nunca disparava rewrite.
+      assinatura_do_header = Renderers::BragBlocks.signature(@renderer.header(day))
 
       # Lock entre processos: o daemon e um rake rodando junto (ou dois ticks
       # sobrepostos) reescreviam a mesma seção em paralelo.
@@ -75,9 +78,9 @@ module Tracking
         next :sem_atividade if report.vazio? && estado.nil?
         # Comparar ANTES de ler a página: o caminho de "nada mudou" (a maioria
         # dos ciclos) não faz nenhum request.
-        next :sem_mudanca if inalterado?(estado, assinaturas)
+        next :sem_mudanca if inalterado?(estado, assinaturas, assinatura_do_header)
 
-        rewrite_section(day, report, blocos, assinaturas, estado)
+        rewrite_section(day, blocos, assinaturas, estado)
         :reescrito
       end
     end
@@ -182,7 +185,7 @@ module Tracking
 
     # Caminho de escrita: com a página lida uma única vez, decide os ids da
     # seção (header, sentinel), apaga o que é nosso e escreve de novo.
-    def rewrite_section(day, report, blocos, assinaturas, estado)
+    def rewrite_section(day, blocos, assinaturas, estado)
       blocks = page_days.blocks
       secao = page_days.section(day, blocks:)
 
@@ -194,8 +197,15 @@ module Tracking
       # Posição do header da seção nova, mantendo a página decrescente: topo se
       # o dia é o mais recente, depois do fim da seção vizinha se está no meio,
       # fim da página se é mais antigo que todos. Ver `posicao_da_secao`.
-      unless header_id
-        header_id = criar(@renderer.header(day, report.epic_note), **posicao_da_secao(day, blocks))
+      bloco_do_header = @renderer.header(day)
+      if header_id
+        # O header de um dia já existente também é nosso: se o formato da copy
+        # mudou, o texto em produção continua no formato antigo para sempre.
+        # Antes só o `unless header_id` criava — um dia escrito com o formato
+        # velho nunca se corrigia ("…Fluxo de captu…").
+        atualizar_header(header_id, bloco_do_header, secao)
+      else
+        header_id = criar(bloco_do_header, **posicao_da_secao(day, blocks))
       end
       sentinel_id ||= criar(@renderer.sentinel, after: header_id)
 
@@ -208,7 +218,24 @@ module Tracking
       apagar(ids_apagar)
       criados = escrever(blocos, after: sentinel_id)
       ledger.record(day, header_id: header_id, sentinel_id: sentinel_id,
+                         header_signature: Renderers::BragBlocks.signature(bloco_do_header),
                          blocks: pares(criados, assinaturas))
+    end
+
+    # O header é nosso e o texto dele é copy: se o formato mudou, o bloco em
+    # produção precisa acompanhar. Compara antes de chamar a API — o ciclo roda
+    # a cada 30 min e o texto do header quase nunca muda.
+    #
+    # `secao` pode ser nil (ledger com header_id, mas a seção sumiu da página):
+    # aí não há texto conhecido para comparar e a atualização é otimista — um
+    # 404 vira aviso, não derruba o ciclo.
+    def atualizar_header(header_id, bloco, secao)
+      esperado = Tracker::Notion::PageDays.text_of(bloco)
+      return if secao && Tracker::Notion::PageDays.text_of(secao.header) == esperado
+
+      client.update_block(header_id, bloco)
+    rescue Tracker::Notion::ApiError => e
+      @logger.warn("[tracking] não deu para atualizar o header #{header_id}: #{e.message}")
     end
 
     # Sentinel do dia já presente na seção (o ledger pode não ter o id se uma
@@ -287,8 +314,12 @@ module Tracking
              .map { |id, assinatura| { id: id, signature: assinatura } }
     end
 
-    def inalterado?(estado, assinaturas)
+    # O corpo E o header precisam bater. A assinatura do header é nil para um
+    # dia gravado antes de ela existir no ledger — nesse caso conta como mudou,
+    # para o formato antigo ser corrigido uma vez.
+    def inalterado?(estado, assinaturas, assinatura_do_header)
       return false if estado.nil?
+      return false if estado[:header_signature] != assinatura_do_header
 
       Array(estado[:blocks]).map { |b| b[:signature] } == assinaturas
     end

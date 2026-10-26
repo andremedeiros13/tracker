@@ -38,13 +38,9 @@ module Tracking
         # Review minha em PR de card que está no dia fica NA LINHA do card, não
         # na seção do fim: "mexi no #2332 e aprovei o PR" é um fato só.
         itens, avulsas = anexar_reviews_aos_cards(itens, github.given_reviews)
-        # O épico só vai no header se todos os ITENS do dia são dele — um card
-        # de outra frente descartado acima não estraga o resumo.
-        epic_note = epico_comum(itens)
 
         Entities::DayReport.new(
           date: day,
-          epic_note: epic_note,
           work_items: ordenar(itens),
           given_reviews: avulsas,
           commits: github.commits
@@ -126,7 +122,6 @@ module Tracking
           title: card.title,
           url: card.url,
           mine: card.mine,
-          epic: card.epic,
           outcome: desfecho(card, pr),
           outcome_at: pr&.merged_at || atividade.ultima_atividade,
           status_chain: @status_chain.call(atividade.transicoes),
@@ -171,15 +166,6 @@ module Tracking
       end
 
       def key_do_pr(pr) = Parsers::TicketKeys.call(pr.title, pr.body).first
-
-      # Só quando todos os itens do dia têm o mesmo épico — aí ele vai uma vez
-      # no header, em vez de repetir em cada item.
-      def epico_comum(itens)
-        return if itens.empty?
-
-        epicos = itens.filter_map(&:epic).map { |e| e.to_s.squish }.reject(&:blank?).uniq
-        epicos.size == 1 ? epicos.first : nil
-      end
 
       # Concluídos (merge desc) → em andamento (atividade desc) → cards de
       # outros. Ordem estável para o dia não pular a cada ciclo.

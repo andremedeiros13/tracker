@@ -19,18 +19,18 @@ module Tracking
     #   :reviewed    — eu revisei o PR de outra pessoa
     #   :commented   — eu só comentei (sem mudança de status)
     WorkItem = Data.define(
-      :key, :title, :url, :mine, :epic,
+      :key, :title, :url, :mine,
       :outcome, :outcome_at,
       :status_chain, :owner_name,
       :pull_requests, :reviews_received, :reviews_given,
       :comments_count, :problema, :solucao, :last_activity_at
     ) do
-      def initialize(key: nil, mine: true, epic: nil, outcome_at: nil, status_chain: [],
+      def initialize(key: nil, mine: true, outcome_at: nil, status_chain: [],
                      owner_name: nil, pull_requests: [], reviews_received: [],
                      reviews_given: [], comments_count: 0, problema: nil,
                      solucao: nil, last_activity_at: nil, **resto)
         super(
-          key: key, mine: mine, epic: epic, outcome_at: outcome_at,
+          key: key, mine: mine, outcome_at: outcome_at,
           status_chain: Array(status_chain), owner_name: owner_name,
           pull_requests: Array(pull_requests), reviews_received: Array(reviews_received),
           reviews_given: Array(reviews_given), comments_count: comments_count,

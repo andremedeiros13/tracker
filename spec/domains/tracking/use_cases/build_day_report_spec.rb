@@ -10,12 +10,12 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
 
   # O adapter já resolveu `mine`: o domínio não conhece account id.
   def card(key:, title: "Resumo", status: "Em andamento", category: "indeterminate",
-           mine: true, assignee: "André", epic: "[Motor][Wave2] Pagamento")
+           mine: true, assignee: "André")
     Tracking::Entities::Card.new(
       id: "id-#{key}", key: key, title: title, url: "https://jira/browse/#{key}",
       status: status, status_category: category, mine: mine,
       assignee_name: assignee, reporter_name: "Marivaldo",
-      epic: epic, description: nil
+      description: nil
     )
   end
 
@@ -140,27 +140,6 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
                                 github: github_day(pull_requests: [ pr_ ])).work_items.first
 
       expect(item.outcome).to eq(:merged)
-    end
-
-    it "usa o épico no header só quando todos os cards compartilham" do
-      cards = [ card(key: "CHEKOUT-1"), card(key: "CHEKOUT-2") ]
-      changelog = {
-        "CHEKOUT-1" => [ transicao(de: "To Do", para: "In Progress", id: "c1") ],
-        "CHEKOUT-2" => [ transicao(de: "To Do", para: "In Progress", id: "c2") ]
-      }
-
-      report = use_case.call(dia, jira: jira_day(cards: cards, activities: changelog))
-      expect(report.epic_note).to eq("[Motor][Wave2] Pagamento")
-    end
-
-    it "sem épico comum quando os cards são de frentes diferentes" do
-      cards = [ card(key: "CHEKOUT-1", epic: "Épico A"), card(key: "CHEKOUT-2", epic: "Épico B") ]
-      changelog = {
-        "CHEKOUT-1" => [ transicao(de: "To Do", para: "In Progress", id: "c1") ],
-        "CHEKOUT-2" => [ transicao(de: "To Do", para: "In Progress", id: "c2") ]
-      }
-
-      expect(use_case.call(dia, jira: jira_day(cards: cards, activities: changelog)).epic_note).to be_nil
     end
 
     it "ordena: concluídos, em andamento, cards de outros" do

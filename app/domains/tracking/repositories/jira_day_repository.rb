@@ -88,7 +88,6 @@ module Tracking
           mine: assignee_id == account_id,
           assignee_name: campos.dig("assignee", "displayName"),
           reporter_name: campos.dig("reporter", "displayName"),
-          epic: campos.dig("parent", "fields", "summary"),
           description: campos["description"],
           id: card.fetch("id")
         )

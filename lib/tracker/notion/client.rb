@@ -69,6 +69,16 @@ module Tracker
         request(:Patch, "/blocks/#{page_id}/children", body:)
       end
 
+      # Atualiza o conteúdo de um block que já existe (PATCH /blocks/{id}).
+      #
+      # Só o payload do TIPO do block pode ir no corpo: `object` e `type` são
+      # regra da API (mandá-los responde 400), então o filtro fica aqui — o
+      # chamador entrega o bloco na forma de `Notion::Blocks` e não precisa
+      # saber o dialeto do PATCH. A posse do bloco é de quem chama.
+      def update_block(block_id, bloco)
+        request(:Patch, "/blocks/#{block_id}", body: bloco.except(:object, :type))
+      end
+
       # Move um block para a lixeira (DELETE /blocks/{id}). Os filhos vão
       # junto (verificado em 2026-10-21 numa page de rascunho: depois do
       # DELETE do pai, /blocks/{pai}/children responde 404).
