@@ -27,6 +27,6 @@ group :development, :test do
   gem "rspec-rails", "~> 8.0"
 
   # RuboCop com plugin Rails (spec.md §5)
-  gem "rubocop", "~> 1.89"
+  gem "rubocop", "~> 1.92"
   gem "rubocop-rails", require: false
 end
