@@ -44,7 +44,7 @@ module Tracking
       def reviewer_field_id = @reviewer_field_id ||= ENV["JIRA_REVIEWER_FIELD_ID"]
 
       def dia(day)
-        cards = client.search(jql_da_janela, fields: CAMPOS)
+        cards = client.search(jql_da_janela(day), fields: CAMPOS)
         return Entities::JiraDay.new if cards.empty?
 
         changelogs = client.changelog_em_lote(cards.map { |card| card.fetch("id") })
@@ -56,8 +56,24 @@ module Tracking
 
       private
 
-      def jql_da_janela
-        base = "updated >= -#{Tracker::Jira::Client::JANELA_JQL_DIAS}d"
+      # A janela do JQL é relativa AO DIA reconstruído, não ao agora.
+      #
+      # Antes era `updated >= -2d`: servia para o ciclo (que só reconstrói
+      # hoje/ontem) e tornava impossível reconstruir um dia passado — o
+      # `pace` do parâmetro `day` não alcançava a query, então um card não
+      # mexido nas últimas 48h nunca entrava, e o dia saía sem ele.
+      #
+      # O teto também é do dia: pedir 30/10 não pode trazer card atualizado em
+      # 04/11 (o JQL devolveria, e o filtro client-side só olha o changelog —
+      # o card em si entraria vazio na seção).
+      #
+      # A folga de 1 dia em cada lado é de fuso: o JQL compara em UTC e o dia
+      # é local (America/Sao_Paulo), então uma transição às 22:00 BRT é +1 dia
+      # em UTC.
+      def jql_da_janela(day)
+        desde = (day - 1).iso8601
+        ate = (day + 1).iso8601
+        base = "updated >= \"#{desde}\" AND updated < \"#{ate}\""
         return "#{base} ORDER BY updated DESC" unless @filtro == "estreito"
 
         "#{base} AND (#{criterios_de_participacao}) ORDER BY updated DESC"

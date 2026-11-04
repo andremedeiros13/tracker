@@ -53,9 +53,14 @@ module Tracking
       # interface do use case): a pergunta "eu participei deste card?" e as
       # três métricas que a acompanham saem da mesma leitura das atividades.
       AtividadeDoDia = Data.define(:card, :jira, :day) do
-        # O card entra no dia se eu movi o status ou comentei. O comentário
-        # não exige `no_dia?`: a janela do Jira já é curta e o comentário é meu
-        # de qualquer forma (é o que o filtro largo da varredura pega).
+        # O card entra no dia se eu movi o status ou comentei NELE.
+        #
+        # O comentário passou a exigir `no_dia?` quando a janela do Jira deixou
+        # de ser "os últimos 2 dias" e virou "o dia reconstruído ± 1". Até
+        # então a janela curta garantia que todo comentário recebido era de
+        # agora, e o predicado podia confiar nisso sem checar; com um dia
+        # passado, um comentário meu de outra data passaria a arrastar o card
+        # para dentro do dia errado.
         def participou? = moveu? || comentou?
 
         # Transições de status do dia, na ordem — o que vira a cadeia.
@@ -65,7 +70,7 @@ module Tracking
           todas.select { |a| a.no_dia?(day) }.map(&:at).max
         end
 
-        def comentarios = todas.count { |a| a.comment? && a.mine }
+        def comentarios = todas.count { |a| a.comment? && a.mine && a.no_dia?(day) }
 
         private
 
@@ -75,7 +80,7 @@ module Tracking
 
         def moveu? = minhas.any? { |a| a.no_dia?(day) }
 
-        def comentou? = todas.any? { |a| a.comment? && a.mine }
+        def comentou? = todas.any? { |a| a.comment? && a.mine && a.no_dia?(day) }
       end
 
       # Anexa as reviews dadas ao WorkItem do card correspondente (casando pela

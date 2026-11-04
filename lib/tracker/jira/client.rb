@@ -10,10 +10,6 @@ module Tracker
     # myself. Timeouts, retry de 429 e mapeamento de erro ficam no transporte
     # comum (Tracker::HTTP).
     class Client
-      # Janela de busca JQL em dias (issues atualizadas recentemente — o
-      # filtro do dia alvo acontece client-side no changelog).
-      JANELA_JQL_DIAS = 2
-
       def initialize(email:, token:, site:)
         @email = email
         @token = token
@@ -26,9 +22,10 @@ module Tracker
             site: ENV.fetch("JIRA_SITE", "https://rdstation.atlassian.net"))
       end
 
-      # Tamanho de página da busca. A API aceita 5000: uma janela de 2 dias
+      # Tamanho de página da busca. A API aceita 5000: uma janela de ~3 dias
       # (~3.500 issues) vem em 1 request de ~1,4s, contra 70 requests e ~34s
-      # com o default de 50.
+      # com o default de 50. A janela é do dia reconstruído (ver
+      # JiraDayRepository#jql_da_janela), não "os últimos N dias".
       BUSCA_MAX_ISSUES = 5000
 
       # Busca por JQL (v3) — paginado por nextPageToken. `fields` escolhe o que

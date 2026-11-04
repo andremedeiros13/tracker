@@ -7,13 +7,21 @@ module Tracking
     # BuildDayReport.
     #
     # Duas buscas de PR, unidas por número, porque uma só perde trabalho:
-    #   created:>=dia  — PR aberto hoje
-    #   merged:>=dia   — PR aberto antes e mergeado hoje (o caso do registro
-    #                    "PR aberto" que nunca virava "mergeado")
+    #   created:D  — PR aberto no dia e ainda não mergeado
+    #   merged:D   — PR que virou entrega no dia (o caso do registro
+    #                "PR aberto" que nunca virava "mergeado")
     # `OR` dentro da mesma query retorna 0 (verificado em 2026-10-21).
+    # Qual dos dois vence quando os dois casam está em `pr_no_dia?`.
     #
     # Os qualificadores de data do GitHub são UTC: buscamos de dia-1 e cortamos
     # client-side em Time.zone, senão um merge às 21:30 BRT cai no dia seguinte.
+    #
+    # A janela tem os DOIS lados. Antes era só `>=dia-1`, e um dia passado
+    # (rake tracking:preview[30/10]) trazia todo PR mergeado desde então: o
+    # corte client-side que existe em `commits` não existia aqui, porque o
+    # caminho normal só reconstrói hoje/ontem e o bug nunca aparecia. Além de
+    # errado, sem teto os 50 resultados da busca são consumidos pelos PRs
+    # recentes e o dia alvo nem aparece.
     class GitHubDayRepository
       # Estado do GitHub → estado de domínio. O adapter NÃO traduz para a copy
       # do documento: quem decide o que o leitor vê é o renderer, dono do
@@ -61,12 +69,38 @@ module Tracking
       end
 
       # União das duas buscas, cortada pelo dia no fuso local.
+      #
+      # O teto `<=dia+1` é folgado de propósito: os qualificadores são UTC e o
+      # dia é local, então um merge às 21:30 BRT é +1 dia em UTC e precisa
+      # entrar na busca para o corte client-side poder aceitá-lo.
       def meus_prs(nome, day)
         desde = day - 1
-        consultas = [ "created:>=#{desde}", "merged:>=#{desde}" ]
-        unicos = consultas.flat_map { |q| client.search_prs("is:pr author:#{nome} #{q}") }
-                          .uniq { |pr| pr.fetch("number") }
-        unicos
+        ate = day + 1
+        consultas = [ "created:#{desde}..#{ate}", "merged:#{desde}..#{ate}" ]
+        consultas.flat_map { |q| client.search_prs("is:pr author:#{nome} #{q}") }
+                 .uniq { |pr| pr.fetch("number") }
+                 .select { |pr| pr_no_dia?(pr, day) }
+      end
+
+      # Um PR pertence ao dia em que VIRA ENTREGA: o dia do merge. Cai em
+      # `created_at` só enquanto não foi mergeado (o PR aberto hoje é entrega
+      # em andamento do dia).
+      #
+      # Antes bastava "aberto OU mergeado no dia", e o PR #1263 (aberto 29/10,
+      # mergeado 03/11) aparecia na seção de 29/10 com o rótulo "MERGEADO
+      # 10:58" — hora de outro dia, na data errada. Na dúvida entre os dois
+      # dias, o merge é o que interessa a quem lê o Brag: o registro do dia é
+      # o que ENTREGOU, não o que começou.
+      #
+      # `merged_at` vem no próprio payload da busca, dentro de `pull_request`
+      # — não custa request extra. Quando presente, ele manda.
+      def pr_no_dia?(pr, day)
+        merged = pr.dig("pull_request", "merged_at")
+        if merged
+          no_dia?(merged, day)
+        else
+          no_dia?(pr["created_at"], day)
+        end
       end
 
       def detalhe_do_pr(pr)
@@ -118,9 +152,15 @@ module Tracking
 
       # Reviews que EU dei hoje, em PR que não é meu. Uma por PR (comentar gera
       # várias COMMENTED seguidas) — fica a mais representativa.
+      #
+      # `updated:` é a data em que o PR foi mexido, não a da review; ela só
+      # serve para achar candidatos, e quem decide o dia é `review_do_dia`
+      # (via submitted_at). O teto existe pelo mesmo motivo de `meus_prs`: sem
+      # ele, um dia passado traz a lista inteira e os 50 resultados são gastos
+      # em PRs recentes.
       def reviews_dadas(nome, day, meus)
         meus_numeros = meus.map { |pr| pr.fetch("number") }
-        client.search_prs("is:pr reviewed-by:#{nome} updated:>=#{day - 1}").filter_map do |pr|
+        client.search_prs("is:pr reviewed-by:#{nome} updated:#{day - 1}..#{day + 1}").filter_map do |pr|
           next if meus_numeros.include?(pr.fetch("number"))
 
           review = review_do_dia(pr, nome, day)

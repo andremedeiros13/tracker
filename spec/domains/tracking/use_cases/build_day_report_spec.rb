@@ -28,9 +28,9 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
     )
   end
 
-  def comentario(mine: true, hora: "16:46")
+  def comentario(mine: true, hora: "16:46", data: dia)
     Tracking::Entities::Activity.new(
-      kind: :comment, mine: mine, at: Time.zone.parse("#{dia} #{hora}")
+      kind: :comment, mine: mine, at: Time.zone.parse("#{data} #{hora}")
     )
   end
 
@@ -107,6 +107,23 @@ RSpec.describe Tracking::UseCases::BuildDayReport do
 
       expect(item.comments_count).to eq(1)
       expect(item.status_chain).to be_empty
+    end
+
+    # Com a janela do Jira presa ao dia reconstruído (±1), o comentário
+    # deixou de estar garantidamente "de agora": antes o predicado confiava
+    # na janela curta e não checava a data.
+    #
+    # Este caso é de defesa em profundidade, não de bug observável: um card
+    # cuja única atividade é comentário de outro dia seria aceito por
+    # `comentou?` sem filtro, mas `sem_conteudo?` já o descartaria por não ter
+    # transição nem comentário do dia. Mantido porque a garantia antiga
+    # (janela curta) deixou de existir, e o predicado não pode depender de
+    # outro filtro para estar certo.
+    it "comentário meu de OUTRO dia não arrasta o card para o dia" do
+      card = card(key: "CHEKOUT-9")
+      comentarios = { "CHEKOUT-9" => [ comentario(data: dia - 1) ] }
+
+      expect(use_case.call(dia, jira: jira_day(cards: [ card ], activities: comentarios)).work_items).to be_empty
     end
 
     it "changelog de campo que não é status não conta como comentário" do

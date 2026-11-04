@@ -156,5 +156,30 @@ RSpec.describe Tracking::Repositories::JiraDayRepository do
         expect(jql).not_to include("currentUser()")
       end
     end
+
+    # A janela era `updated >= -2d`: relativa ao agora, então reconstruir um
+    # dia passado trazia os cards dos últimos 2 dias (e nenhum do dia pedido).
+    it "a janela é do dia reconstruído, não do agora" do
+      allow(client).to receive(:changelog_em_lote).and_return({})
+
+      repository.dia(dia)
+
+      expect(client).to have_received(:search) do |jql, **_|
+        expect(jql).to include('updated >= "2026-10-20"')
+        expect(jql).to include('updated < "2026-10-22"')
+        expect(jql).not_to include("-2d")
+      end
+    end
+
+    it "reconstruir dias diferentes pede janelas diferentes" do
+      allow(client).to receive(:changelog_em_lote).and_return({})
+      allow(client).to receive(:search).and_return([])
+
+      repository.dia(Date.new(2026, 10, 21))
+      repository.dia(Date.new(2026, 10, 30))
+
+      expect(client).to have_received(:search).with(/2026-10-20/, anything).ordered
+      expect(client).to have_received(:search).with(/2026-10-29/, anything).ordered
+    end
   end
 end
