@@ -1,0 +1,12 @@
+[Unit]
+Description=Alerta de falha do %i (Notificação nativa)
+# Unit oneshot disparada pelo `OnFailure=` do tracker.service. Existe separada
+# porque `OnFailure=` aceita apenas NOME DE UNIT, nunca um comando — tentar
+# `OnFailure=/caminho/script` faz o systemd descartar a dependência em silêncio.
+#
+# O `@` é template: %i é o nome da unit que falhou (sem o sufixo .service).
+# Assim o mesmo alerta serve para qualquer unit do projeto que venha a existir.
+
+[Service]
+Type=oneshot
+ExecStart=%h/Repositories/tracker/bin/tracker-alert %i

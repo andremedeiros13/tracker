@@ -44,6 +44,15 @@ boot dispara um ciclo inteiro junto com o seu comando.
 - **O daemon em `production` não recarrega código.** Editar um arquivo não muda
   o comportamento até o systemd reiniciar o processo (ele reinicia em 5s após
   morrer). `MemoryMax=2G` no unit — um `Killed` sem traceback é OOM, não bug.
+  Um erro de boot reinicia até o teto (`StartLimitBurst=12`), depois a unit vai
+  para `failed` e o `OnFailure=` avisa no desktop. O alerta é shell
+  (`bin/tracker-alert`), não Ruby: o processo morre antes de qualquer job.
+- **`OnFailure=` aceita só nome de unit, e a instância de template usa `%n`.**
+  `OnFailure=/caminho/script` e `OnFailure=alerta@%N` (sem `.service`) são
+  descartados com "Argumento inválido" — em silêncio, sem falhar o boot.
+  Sempre confira com `systemd-analyze verify` e
+  `systemctl --user show tracker.service -p OnFailure`: um `OnFailure=` vazio
+  quer dizer que a dependência não resolveu.
 - **O schema do Notion é validado no boot** e falha cedo se divergir. Ao mudar
   uma propriedade, mude `Todos::Repositories::NotionSchema` (fonte única) — o
   mapper, o validador e a escrita derivam dela. Nenhum label literal.

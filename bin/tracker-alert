@@ -1,0 +1,62 @@
+#!/usr/bin/env sh
+# Alerta de falha do daemon — disparado pelo systemd (OnFailure=), NÃO pelo Rails.
+#
+# O daemon já morreu quando este script roda. O caso real (2026-10-27) foi um
+# initializer levantando SchemaError antes de qualquer job existir — um alerta
+# escrito em Ruby dentro do processo seria inalcançável por definição. Por isso
+# aqui é shell puro: sem Rails, sem Bundler, sem .env, sem banco.
+#
+# Recebe o nome da unit como o systemd o passa para a instância da template:
+# com o sufixo (`tracker.service`). Aceita sem sufixo também, porque rodar o
+# script à mão é o que se faz para testar.
+set -u
+
+unit="${1:-tracker}"
+case "$unit" in
+  *.service) ;;
+  *) unit="$unit.service" ;;
+esac
+titulo="Tracker parou"
+
+# A causa mora no journal. Sem ela o toast só diz "parou", e a pergunta seguinte
+# (OOM? schema? credencial?) obriga a abrir um terminal — foi o que atrasou o
+# diagnóstico do crash-loop de 8 dias.
+#
+# O journal mistura duas coisas: o que o processo escreveu (stderr, a causa) e o
+# que o systemd escreveu SOBRE o processo ("Main process exited", "Failed with
+# result", "Start request repeated too quickly"). Só o primeiro interessa, e o
+# segundo é o que aparece por último — daí o filtro pelos prefixos de controle.
+# `tail -n 3` fica depois do filtro: queremos as 3 últimas linhas DA CAUSA, não
+# as 3 últimas do journal.
+erro=$(journalctl --user -u "$unit" --since=-10min --no-pager -o cat 2>/dev/null \
+  | grep -v -E "(^[[:space:]]*(from |\$)|^${unit%%.*}[^:]*: (Main process|Failed with|Scheduled restart|Start request|Stopped|Killing|Consumed)|^(Failed to start|Started|Stopping|Stopped) )" \
+  | tail -n 3)
+
+if [ -n "$erro" ]; then
+  corpo="$erro"
+else
+  corpo="O daemon falhou e o systemd parou de reiniciar. Veja: journalctl --user -u $unit"
+fi
+
+avisou=0
+
+# urgency=critical: o GNOME mantém na central de notificações até ser lida. Um
+# alerta de urgência normal some sozinho, e o daemon pode ficar dias parado sem
+# ninguém ver — exatamente o que aconteceu.
+if command -v notify-send >/dev/null 2>&1; then
+  if notify-send --urgency=critical --app-name=Tracker --icon=dialog-error \
+       "$titulo" "$corpo" 2>/dev/null; then
+    avisou=1
+  fi
+fi
+
+# Sem canal gráfico (SSH, sessão sem D-Bus, SO sem notify-send) a notificação
+# falha calada — devolver silêncio aqui seria repetir o bug original. O journal
+# é o canal que sobra, e `systemctl --failed` já mostra a unit.
+if [ "$avisou" = 0 ]; then
+  echo "[tracker-alert] notificação nativa indisponível; unit $unit em failed" >&2
+  echo "[tracker-alert] causa: $corpo" >&2
+  exit 1
+fi
+
+exit 0

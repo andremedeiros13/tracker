@@ -139,6 +139,48 @@ Se o processo morrer sem traceback (`Killed`), foi o teto de memória do unit
 (`MemoryMax=2G`) e o systemd reinicia em 5s — o reinício também pega código
 novo, então editar o código sem reiniciar não muda o comportamento.
 
+### Alerta quando o daemon não sobe
+
+Um erro de boot (schema divergente, `.env` inválido, credencial expirada) mata
+o processo **antes** de qualquer job rodar — então não há como o próprio app
+avisar. Quem avisa é o systemd, quando desiste de reiniciar:
+
+- `StartLimitBurst=12` / `StartLimitIntervalSec=300` — depois de 12 falhas em
+  5 minutos o systemd para de tentar e a unit vai para `failed`. Sem esse teto,
+  um erro de boot vira crash-loop silencioso (aconteceu em 2026-10-27: 623
+  reinícios em 8 dias, nenhum aviso).
+- `OnFailure=tracker-alert@%n` dispara `dist/tracker-alert@.service`, que roda
+  `bin/tracker-alert` — shell puro, sem Rails/Bundler/.env.
+- O toast é `urgency=critical` (fica na central de notificações até ser lido) e
+  traz as últimas linhas de erro do journal, para responder "por quê" sem abrir
+  o terminal. Sem canal gráfico, o script sai com 1 e escreve a causa no
+  journal — falha de alerta não vira silêncio.
+
+Os dois arquivos de `dist/` precisam estar instalados — o `@` de
+`tracker-alert@.service` é uma unit-template, não um script:
+
+```bash
+cp dist/tracker.service dist/tracker-alert@.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+```
+
+Para conferir o estado depois de um crash:
+
+```bash
+systemctl --user --failed                  # a unit desistiu de reiniciar?
+systemctl --user list-unit-files 'tracker-alert*'   # template instalada?
+```
+
+Testar o alerta sem derrubar o daemon: crie uma unit que falha de propósito
+(exit 1) com `OnFailure=tracker-alert@%n` e um `StartLimitBurst` baixo, dispare
+com `systemctl --user start` e espere o systemd desistir. O toast deve trazer a
+mensagem de erro da unit de teste. Depois remova a unit e rode `daemon-reload` +
+`reset-failed`.
+
+> No `OnFailure=`, use `%n` (com o sufixo `.service`). O `%N` (sem sufixo) é
+> descartado pelo systemd com "Argumento inválido" — e a dependência some em
+> silêncio.
+
 ## Rodar no login (opcional, recomendado)
 
 Se o daemon não sobe no login, você precisa lembrar de iniciar — o que mata o

@@ -1,6 +1,24 @@
 [Unit]
 Description=Tracker — painel de To-Do + notificações nativas (daemon)
 After=graphical-session.target
+# Sem teto de tentativas, um erro de boot vira ruído eterno: em 2026-10-27 o
+# schema do Notion divergiu e o daemon reiniciou 623 vezes em 8 dias sem que
+# nada avisasse. Com burst, o systemd desiste e entra em `failed` — estado que
+# aparece em `systemctl --failed` e que é o único gatilho do OnFailure=.
+# 12 tentativas ≈ 1 min de indisponibilidade antes de desistir; um crash
+# transitório (OOM, rede) ainda é absorvido.
+StartLimitIntervalSec=300
+StartLimitBurst=12
+# Alerta no desktop quando o systemd desiste de reiniciar. Fica no unit, e não
+# no código do app, porque o daemon morre durante o boot — um initializer que
+# levanta (foi o SchemaError de 2026-10-27) mata o processo antes de qualquer
+# job rodar, então um alerta em Ruby nunca seria alcançado.
+# `OnFailure=` aceita só nome de unit (um caminho é descartado em silêncio), daí
+# a unit-template tracker-alert@. `%n` (COM o sufixo .service) e não `%N`: o
+# systemd exige que a instância de uma template seja um nome de unit completo —
+# `tracker-alert@tracker` é descartado como argumento inválido, enquanto
+# `tracker-alert@tracker.service` resolve.
+OnFailure=tracker-alert@%n
 
 [Service]
 Type=simple
