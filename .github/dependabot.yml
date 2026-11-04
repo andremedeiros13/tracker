@@ -1,12 +1,39 @@
 version: 2
+
 updates:
-- package-ecosystem: bundler
-  directory: "/"
-  schedule:
-    interval: weekly
-  open-pull-requests-limit: 10
-- package-ecosystem: github-actions
-  directory: "/"
-  schedule:
-    interval: weekly
-  open-pull-requests-limit: 10
+  - package-ecosystem: bundler
+    directory: "/"
+    # Diário e agrupado. A cadência é diária porque o gate roda contra um
+    # advisory-db que muda sem aviso: em 2026-11-04 o `main` quebrou duas
+    # vezes no mesmo dia (loofah/nokogiri/rack e depois Rails) sem que
+    # ninguém tivesse escrito código. Chegando como PR, o patch aparece
+    # antes de derrubar o CI sozinho.
+    #
+    # O volume não cresce com a cadência porque os grupos consolidam: o que
+    # chega são ~2 PRs por rodada, não um por gem.
+    schedule:
+      interval: daily
+    open-pull-requests-limit: 5
+    groups:
+      # Produção e desenvolvimento separados: um bump de produção pede
+      # leitura do que mudou em runtime, o de dev costuma ser ruído de lint.
+      # Juntar os dois faria o PR de lint carregar junto o que roda em prod.
+      producao:
+        dependency-type: production
+        update-types: ["minor", "patch"]
+      desenvolvimento:
+        dependency-type: development
+        update-types: ["minor", "patch"]
+    # Major fica FORA dos grupos de propósito: um salto de major precisa de
+    # PR próprio, para ser lido, e não diluído num lote de patch.
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    # Actions ficam semanais: não são auditadas pelo bundler-audit, então não
+    # derrubam o gate sozinhas, e bump de action é raro.
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns: ["*"]
