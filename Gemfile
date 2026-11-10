@@ -24,9 +24,9 @@ group :development, :test do
   gem "rubocop-rails-omakase", require: false
 
   # Specs (spec.md §5 — decisão do mapa: RSpec)
-  gem "rspec-rails", "~> 8.0"
+  gem "rspec-rails", "~> 8.1"
 
   # RuboCop com plugin Rails (spec.md §5)
-  gem "rubocop", "~> 1.89"
+  gem "rubocop", "~> 1.92"
   gem "rubocop-rails", require: false
 end
